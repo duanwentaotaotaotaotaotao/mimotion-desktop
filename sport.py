@@ -16,6 +16,16 @@ import webbrowser
 import customtkinter as ctk
 
 SPORT_URL = "https://sport.gyvv.top/"
+BG = "#F5F4EF"
+SURFACE = "#FFFEFA"
+RAISED = "#ECEFE8"
+TEXT = "#3E4944"
+MUTED = "#818880"
+ACCENT = "#7E9481"
+SAGE = "#7E9481"
+LAVENDER = "#B5A9C7"
+ERROR = "#BA7D7A"
+BORDER = "#E0E5DA"
 HOST_FILES = ("MiMotion.SportHost.exe", "MiMotion.SportHost.exe.config", "Microsoft.Web.WebView2.Core.dll",
               "Microsoft.Web.WebView2.WinForms.dll", "WebView2Loader.dll", "LICENSE-WebView2.txt")
 
@@ -82,7 +92,7 @@ def close_host(process, quit_file: Path | None, status_file: Path | None = None)
 class SportPanel(ctk.CTkFrame):
     """A real child browser inside the existing desktop content area."""
     def __init__(self, master, project: Path, notify, inspect_report: Path | None = None):
-        super().__init__(master, fg_color="#FFFFFF", corner_radius=0)
+        super().__init__(master, fg_color=BG, corner_radius=0)
         self.project = Path(project)
         self.notify = notify
         self.inspect_report = inspect_report
@@ -96,25 +106,43 @@ class SportPanel(ctk.CTkFrame):
         self.poll_id = None
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
-        top = ctk.CTkFrame(self, fg_color="#EDF3E8", corner_radius=9)
-        top.grid(row=0, column=0, sticky="ew", pady=(0, 9))
+        top = ctk.CTkFrame(self, fg_color=SURFACE, corner_radius=8, border_width=1, border_color=BORDER)
+        top.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         top.grid_columnconfigure(0, weight=1)
-        self.status_label = ctk.CTkLabel(top, text="正在打开运动轨迹…", anchor="w",
-                                        text_color="#193D32", font=("Microsoft YaHei UI", 11))
-        self.status_label.grid(row=0, column=0, sticky="ew", padx=13, pady=9)
+        self.status_label = ctk.CTkLabel(top, text="◌  正在打开路线工作台", anchor="w",
+                                        text_color=MUTED, font=("Microsoft YaHei UI", 12))
+        self.status_label.grid(row=0, column=0, sticky="ew", padx=17, pady=(13, 11))
         for column, (text, command) in enumerate([
-            ("重新打开", self.restart), ("大窗口", self.open_large),
-            ("导出目录", self.open_exports),
+            ("↻  重新连接", self.restart), ("↗  大窗口", self.open_large),
+            ("导出文件", self.open_exports),
         ], 1):
-            ctk.CTkButton(top, text=text, command=command, width=77, height=29,
-                          fg_color="#DDE9D4", hover_color="#CFE1C1", text_color="#193D32",
-                          font=("Microsoft YaHei UI", 11)).grid(row=0, column=column, padx=(0, 8), pady=8)
-        self.surface = tk.Frame(self, background="#FFFFFF", bd=0, highlightthickness=0)
+            primary = column == 3
+            ctk.CTkButton(top, text=text, command=command, width=96, height=34, corner_radius=7,
+                          fg_color=ACCENT if primary else RAISED,
+                          hover_color="#6D8471" if primary else BORDER,
+                          text_color="#FFFFFF" if primary else TEXT,
+                          border_width=0 if primary else 1, border_color=BORDER,
+                          font=("Microsoft YaHei UI", 11, "bold" if primary else "normal")).grid(row=0, column=column, padx=(0, 10), pady=11)
+        self.progress = ctk.CTkProgressBar(top, height=2, fg_color=SURFACE, progress_color=ACCENT,
+                                          mode="indeterminate", corner_radius=0)
+        self.progress.grid(row=1, column=0, columnspan=4, sticky="ew", padx=14, pady=(0, 2))
+        self.progress.start()
+        self.surface = tk.Frame(self, background=BG, bd=0, highlightthickness=0)
         self.surface.grid(row=1, column=0, sticky="nsew")
-        self.message = tk.Label(self.surface, text="正在准备浏览器组件…", bg="#FFFFFF", fg="#748079",
+        self.message = tk.Label(self.surface, text="正在打开路线工作台\n\n地图载入后，可直接绘制、编辑与导出。", bg=BG, fg=MUTED,
                                 font=("Microsoft YaHei UI", 14), justify="center")
         self.message.place(relx=.5, rely=.42, anchor="center")
         self.start_id = self.after(250, self.start)
+
+    def _loading(self):
+        self.progress.stop()
+        self.progress.configure(mode="indeterminate", progress_color=ACCENT)
+        self.progress.start()
+
+    def _settled(self, value=1, color=SAGE):
+        self.progress.stop()
+        self.progress.configure(mode="determinate", progress_color=color)
+        self.progress.set(value)
 
     def start(self):
         self.start_id = None
@@ -138,12 +166,14 @@ class SportPanel(ctk.CTkFrame):
                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             self.started_at = time.monotonic()
-            self.status_label.configure(text="正在加载 sport.gyvv.top…")
-            self.message.configure(text="正在加载运动轨迹页面…\n首次打开可能需要一些时间。")
+            self.status_label.configure(text="◌  正在连接 sport.gyvv.top", text_color=MUTED)
+            self._loading()
+            self.message.configure(text="正在打开路线工作台\n\n地图载入后，可直接绘制、编辑与导出。")
             self.last_status = {}
             self.poll()
         except (OSError, RuntimeError) as exc:
-            self.status_label.configure(text="运动轨迹暂时无法打开")
+            self._settled(0, ERROR)
+            self.status_label.configure(text="●  暂时无法打开", text_color=ERROR)
             self.message.configure(text=str(exc) + "\n可点击“重新打开”重试。")
             self.notify(str(exc), True)
 
@@ -157,16 +187,20 @@ class SportPanel(ctk.CTkFrame):
                     self.last_status = status
                     state = status.get("state")
                     if state == "ready":
-                        self.status_label.configure(text="●  运动轨迹  ·  sport.gyvv.top  ·  在线")
+                        self._settled()
+                        self.status_label.configure(text="●  路线工作台已就绪  ·  sport.gyvv.top", text_color=SAGE)
                     elif state == "error":
-                        self.status_label.configure(text="加载遇到问题，可重新打开或使用浏览器访问")
+                        self._settled(0, ERROR)
+                        self.status_label.configure(text="●  连接遇到问题，点击重新连接", text_color=ERROR)
                         self.message.configure(text=str(status.get("message", "网站暂时无法加载")))
                     else:
-                        self.status_label.configure(text="正在加载 sport.gyvv.top…")
+                        self._loading()
+                        self.status_label.configure(text="◌  正在加载地图与编辑器", text_color=MUTED)
             if self.process and self.process.poll() is not None:
                 self.process = None
-                self.status_label.configure(text="运动轨迹页面已关闭，点击“重新打开”继续")
-                self.message.configure(text="点击上方“重新打开”加载运动轨迹。")
+                self._settled(0, MUTED)
+                self.status_label.configure(text="○  工作台已关闭", text_color=MUTED)
+                self.message.configure(text="路线工作台已关闭\n\n点击上方“重新连接”继续编辑。")
                 return
         except (OSError, ValueError, TypeError):
             pass
@@ -215,6 +249,7 @@ class SportPanel(ctk.CTkFrame):
         if self.closed:
             return
         self.closed = True
+        self.progress.stop()
         if self.start_id:
             self.after_cancel(self.start_id)
             self.start_id = None

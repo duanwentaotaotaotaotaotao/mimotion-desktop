@@ -18,7 +18,7 @@ import backend as service
 
 
 def arguments():
-    parser = argparse.ArgumentParser(description="MiMotion 桌面助手")
+    parser = argparse.ArgumentParser(description="move")
     parser.add_argument("--project", type=Path)
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--scheduled", action="store_true")
@@ -67,20 +67,20 @@ import customtkinter as ctk
 from sport import SportPanel
 
 
-BG = "#F4F6F1"
-WHITE = "#FFFFFF"
-INK = "#203630"
-MUTED = "#748079"
-BORDER = "#E1E7DD"
-GREEN = "#193D32"
-SIDEBAR = "#142F29"
-LIME = "#C3EE8E"
-PALE = "#EAF4E1"
-RED = "#AC4C41"
+BG = "#F5F4EF"
+WHITE = "#FFFEFA"
+INK = "#3E4944"
+MUTED = "#818880"
+BORDER = "#E0E5DA"
+GREEN = "#7E9481"
+SIDEBAR = "#EFF2EA"
+LIME = "#7E9481"
+PALE = "#ECEFE8"
+RED = "#BA7D7A"
 FONT = "Microsoft YaHei UI"
 
 
-class MiMotionApp(ctk.CTk):
+class BaseMiMotionApp(ctk.CTk):
     def __init__(self, project: Path, demo=False):
         super().__init__()
         self.demo = demo
@@ -206,7 +206,7 @@ class MiMotionApp(ctk.CTk):
         path_label = str(self.project)
         if len(path_label) > 43:
             path_label = "…" + path_label[-42:]
-        self.project_badge.configure(text=("离线演示  ·  " if self.demo else "●  ") + path_label)
+        self.project_badge.configure(text=("离线演示  ·  " if self.demo else "本机项目  ·  ") + self.project.name)
 
     def choose_project(self):
         if self.process:
@@ -368,9 +368,9 @@ class MiMotionApp(ctk.CTk):
         maximum = str(self.config_data["MAX_STEP"])
         self.mode = ctk.StringVar(value="固定步数" if minimum == maximum else "随机范围")
         ctk.CTkSegmentedButton(step_card, values=["固定步数", "随机范围"], variable=self.mode,
-                               command=self.change_mode, selected_color=LIME,
-                               selected_hover_color="#B4DF7E", unselected_color="#EDF1E9",
-                               unselected_hover_color="#E0E7DB", text_color=INK,
+                               command=self.change_mode, selected_color="#DDE7D9",
+                               selected_hover_color="#D3E0CE", unselected_color="#20242E",
+                               unselected_hover_color="#E4EBDD", text_color=INK,
                                font=self.font(12), height=36).grid(row=1, column=0, sticky="w", padx=22)
         numbers = ctk.CTkFrame(step_card, fg_color="transparent")
         numbers.grid(row=2, column=0, sticky="ew", padx=22, pady=(13, 4))
@@ -793,6 +793,13 @@ class MiMotionApp(ctk.CTk):
         if hasattr(self, "sport_panel"):
             self.sport_panel.close()
         self.destroy()
+
+
+from studio_ui import StudioInterface
+
+
+class MiMotionApp(StudioInterface, BaseMiMotionApp):
+    pass
 
 
 if __name__ == "__main__":

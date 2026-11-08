@@ -20,7 +20,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 BJ = timezone(timedelta(hours=8))
 DEFAULTS = {"USER": "", "PWD": "", "MIN_STEP": "18000", "MAX_STEP": "25000",
             "NO_TIME_RATE": "True", "SLEEP_GAP": "5", "USE_CONCURRENT": "False"}
@@ -329,7 +329,7 @@ def run_worker(root: Path, result_path: Path | None = None, demo=False) -> int:
             with log_path.open("w", encoding="utf-8", buffering=1) as target:
                 safe = SafeLog(target, config)
                 with contextlib.redirect_stdout(safe), contextlib.redirect_stderr(safe):
-                    print(f"==== MiMotion 桌面版 {now():%Y-%m-%d %H:%M:%S} ====")
+                    print(f"==== move {now():%Y-%m-%d %H:%M:%S} ====")
                     print("[正在运行]" + (" 本次为离线模拟，不访问平台。" if demo else ""))
                     old_cwd = Path.cwd()
                     try:

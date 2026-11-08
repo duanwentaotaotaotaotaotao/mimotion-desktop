@@ -74,6 +74,14 @@ namespace MiMotion.SportHost
         [DllImport("user32.dll")] internal static extern IntPtr GetWindowDpiAwarenessContext(IntPtr hwnd);
         [DllImport("user32.dll")] internal static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
         [DllImport("shcore.dll")] internal static extern int SetProcessDpiAwareness(int value);
+        [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+        internal static void LightTitleBar(IntPtr hwnd)
+        {
+            try { int enabled = 0; DwmSetWindowAttribute(hwnd, 20, ref enabled, sizeof(int)); }
+            catch (DllNotFoundException) { }
+            catch (EntryPointNotFoundException) { }
+        }
 
         internal static void MatchDpi(IntPtr parent)
         {
@@ -135,6 +143,15 @@ namespace MiMotion.SportHost
     internal sealed class HostForm : Form
     {
         internal const string SiteUrl = "https://sport.gyvv.top/";
+        private static readonly Color StudioBackground = Color.FromArgb(245, 244, 239);
+        private static readonly Color StudioSurface = Color.FromArgb(255, 254, 250);
+        private static readonly Color StudioRaised = Color.FromArgb(236, 239, 232);
+        private static readonly Color StudioBorder = Color.FromArgb(224, 229, 218);
+        private static readonly Color StudioText = Color.FromArgb(62, 73, 68);
+        private static readonly Color StudioMuted = Color.FromArgb(129, 136, 128);
+        private static readonly Color StudioAccent = Color.FromArgb(126, 148, 129);
+        private static readonly Color StudioSage = Color.FromArgb(126, 148, 129);
+        private static readonly Color StudioError = Color.FromArgb(186, 125, 122);
         private readonly Options options;
         private WebView2 browser;
         private readonly Label status;
@@ -182,10 +199,10 @@ namespace MiMotion.SportHost
             if (!String.IsNullOrEmpty(options.ExportDir)) exportDirectory = options.ExportDir;
             Directory.CreateDirectory(local);
             Directory.CreateDirectory(exportDirectory);
-            Text = "MiMotion · 运动轨迹" + (!String.IsNullOrEmpty(options.SelfTest) ? " · 离线检查" : "");
+            Text = "move · 路线工作台" + (!String.IsNullOrEmpty(options.SelfTest) ? " · 离线检查" : "");
             Font = new Font("Microsoft YaHei UI", 9F);
             AutoScaleMode = AutoScaleMode.None;
-            BackColor = Color.White;
+            BackColor = StudioBackground;
             ClientSize = new Size(1150, 760);
             MinimumSize = options.Parent == IntPtr.Zero ? new Size(700, 450) : Size.Empty;
             StartPosition = FormStartPosition.CenterScreen;
@@ -198,41 +215,42 @@ namespace MiMotion.SportHost
             }
             tools = new FlowLayoutPanel();
             tools.Dock = DockStyle.Top;
-            tools.Height = 43;
-            tools.Padding = new Padding(7, 5, 0, 4);
-            tools.BackColor = Color.FromArgb(238, 243, 233);
+            tools.Height = 46;
+            tools.Padding = new Padding(9, 7, 0, 5);
+            tools.BackColor = StudioSurface;
             tools.WrapContents = false;
             tools.AutoScroll = true;
             tools.Controls.Add(MakeButton("后退", delegate { if (browser.CoreWebView2 != null && browser.CanGoBack) browser.GoBack(); }));
             tools.Controls.Add(MakeButton("刷新", delegate { Retry(); }));
-            tools.Controls.Add(MakeButton("网站首页", delegate { if (browser.CoreWebView2 != null) browser.CoreWebView2.Navigate(SiteUrl); else Retry(); }));
-            tools.Controls.Add(MakeButton("导出文件夹", delegate { OpenExportFolder(); }));
+            tools.Controls.Add(MakeButton("首页", delegate { if (browser.CoreWebView2 != null) browser.CoreWebView2.Navigate(SiteUrl); else Retry(); }));
+            if (options.Parent == IntPtr.Zero)
+                tools.Controls.Add(MakeButton("导出文件", delegate { OpenExportFolder(); }));
             tools.Controls.Add(MakeButton("保存位置", delegate { ChooseExportFolder(); }));
             tools.Controls.Add(MakeButton("浏览器打开", delegate { OpenExternal(SiteUrl); }));
             var attribution = new Label();
             attribution.AutoSize = true;
-            attribution.ForeColor = Color.FromArgb(90, 111, 98);
-            attribution.Text = "sport.gyvv.top · 在线工具";
+            attribution.ForeColor = StudioMuted;
+            attribution.Text = "sport.gyvv.top  /  在线工具";
             attribution.Padding = new Padding(10, 5, 5, 0);
             tools.Controls.Add(attribution);
             status = new Label();
             status.Dock = DockStyle.Bottom;
-            status.Height = 28;
-            status.Padding = new Padding(9, 4, 8, 2);
-            status.BackColor = Color.FromArgb(244, 246, 241);
-            status.ForeColor = Color.FromArgb(32, 54, 48);
+            status.Height = 30;
+            status.Padding = new Padding(12, 5, 8, 2);
+            status.BackColor = StudioSurface;
+            status.ForeColor = StudioMuted;
             status.AutoEllipsis = true;
             status.Text = message;
             failure = new Label();
             failure.Dock = DockStyle.Top;
             failure.Height = 63;
             failure.Padding = new Padding(12, 8, 12, 6);
-            failure.BackColor = Color.FromArgb(251, 240, 234);
-            failure.ForeColor = Color.FromArgb(145, 59, 46);
+            failure.BackColor = Color.FromArgb(248, 239, 235);
+            failure.ForeColor = StudioError;
             failure.Visible = false;
             browser = new WebView2();
             browser.Dock = DockStyle.Fill;
-            browser.DefaultBackgroundColor = Color.White;
+            browser.DefaultBackgroundColor = StudioBackground;
             Controls.Add(browser);
             Controls.Add(failure);
             Controls.Add(tools);
@@ -242,7 +260,12 @@ namespace MiMotion.SportHost
             timer.Tick += OnTimer;
             Shown += async delegate
             {
-                try { AttachParent(); if (!closing) await Initialize(); }
+                try
+                {
+                    if (options.Parent == IntPtr.Zero) Native.LightTitleBar(Handle);
+                    AttachParent();
+                    if (!closing) await Initialize();
+                }
                 catch (Exception exception)
                 {
                     ShowError("运动轨迹页面暂时无法嵌入，请重新打开此模块。", exception.Message);
@@ -279,12 +302,20 @@ namespace MiMotion.SportHost
             var button = new Button();
             button.Text = caption;
             button.AutoSize = true;
-            button.Height = 30;
-            button.MinimumSize = new Size(58, 29);
+            button.Height = 31;
+            button.MinimumSize = new Size(58, 30);
             button.FlatStyle = FlatStyle.Flat;
-            button.FlatAppearance.BorderColor = Color.FromArgb(218, 227, 211);
-            button.BackColor = Color.FromArgb(247, 250, 244);
-            button.ForeColor = Color.FromArgb(32, 54, 48);
+            button.FlatAppearance.BorderColor = StudioBorder;
+            button.FlatAppearance.MouseOverBackColor = StudioBorder;
+            button.FlatAppearance.MouseDownBackColor = Color.FromArgb(216, 224, 212);
+            button.BackColor = caption == "保存位置" ? StudioAccent : StudioRaised;
+            button.ForeColor = caption == "保存位置" ? Color.White : StudioText;
+            if (caption == "保存位置")
+            {
+                button.FlatAppearance.MouseOverBackColor = Color.FromArgb(109, 132, 113);
+                button.FlatAppearance.MouseDownBackColor = Color.FromArgb(96, 119, 100);
+            }
+            button.Cursor = Cursors.Hand;
             button.Margin = new Padding(0, 0, 6, 0);
             button.Click += delegate { action(); };
             return button;
@@ -604,7 +635,7 @@ namespace MiMotion.SportHost
                 browser.Dispose();
                 browser = new WebView2();
                 browser.Dock = DockStyle.Fill;
-                browser.DefaultBackgroundColor = Color.White;
+                browser.DefaultBackgroundColor = StudioBackground;
                 Controls.Add(browser);
                 browser.SendToBack();
                 recreateBrowser = false;
@@ -656,6 +687,7 @@ namespace MiMotion.SportHost
         {
             state = value;
             message = text;
+            status.ForeColor = value == "ready" ? StudioSage : (value == "error" ? StudioError : StudioAccent);
             status.Text = text;
             WriteStatus();
         }
@@ -691,8 +723,8 @@ namespace MiMotion.SportHost
         {
             string folder = Path.Combine(options.Project, ".mimotion-desktop", "sport-self-test");
             Directory.CreateDirectory(folder);
-            string html = "<!doctype html><meta charset='utf-8'><title>MiMotion offline WebView check</title>" +
-                "<h1>MiMotion offline WebView check</h1><p>No external requests.</p><script>" +
+            string html = "<!doctype html><meta charset='utf-8'><title>move offline WebView check</title>" +
+                "<h1>move offline WebView check</h1><p>No external requests.</p><script>" +
                 "window.priorStorage=localStorage.getItem('mimotion_self_test');localStorage.setItem('mimotion_self_test','persistent-ok');" +
                 "setTimeout(function(){var a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['mimotion-offline-export,ok\\n'],{type:'text/csv'}));" +
                 "a.download='mimotion-offline-export.csv';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href)},2000)},500);</script>";
@@ -755,7 +787,7 @@ namespace MiMotion.SportHost
                         JsonFile.Write(options.SelfTest, new { passed = false, error = exception.Message });
                 }
                 if (options == null || (options.Parent == IntPtr.Zero && String.IsNullOrEmpty(options.SelfTest)))
-                    MessageBox.Show("运动轨迹模块暂时无法启动：" + exception.Message, "MiMotion", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("运动轨迹模块暂时无法启动：" + exception.Message, "move", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
     }

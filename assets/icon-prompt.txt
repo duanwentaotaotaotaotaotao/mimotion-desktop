@@ -1,0 +1,8 @@
+move / Q版芙莉莲图标生成说明
+
+工具：内置 image_gen；不是 CLI/API fallback。
+输出：带真实 alpha 的透明 PNG；Windows ICO 由同一 PNG 进行格式转换。
+用途：用户指定的 move 应用图标和界面头像。
+
+Final prompt:
+Use case: illustration-story. Asset type: a single transparent-background desktop application icon for an app named move. Primary request: create a beautifully drawn cute chibi Frieren (the silver-haired elf mage from Frieren: Beyond Journey's End), head-and-shoulders portrait, recognizable character design: long silver-white twin-tail hair, straight center fringe, long pointed elf ears clearly visible, large calm emerald-green eyes with her characteristic relaxed slightly sleepy gentle expression, tiny soft smile, small red earrings, her ivory-white mage outfit with restrained gold edging and a tiny dark inner collar. Style: high-quality clean 2D Japanese anime chibi illustration, 2.5-head proportions, soft watercolor-like pastel shading but crisp simple contour, delicate and adorable, serene and understated rather than exaggerated comedy. Composition: centered head and shoulders, face large and legible for 32px/48px Windows app icons, ears and twin-tail hair completely within the frame with generous transparent padding; compact rounded silhouette occupying about 80% of the square, no props, no staff, no text or letters, no border, no square or circular background, no scenery, no watermark. Palette: ivory/silver white, muted sage green eyes, tiny gold and red accents, subtle pale lavender shadows. Genuine alpha transparency around the character, not a checkerboard illustration. One character only, one final icon, no contact sheet.

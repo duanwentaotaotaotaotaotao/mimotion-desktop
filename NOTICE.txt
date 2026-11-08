@@ -1,4 +1,4 @@
-MiMotion Desktop 1.1.0
+move 1.2.0
 
 This application packages the user's local copy of TonyJiangWJ/mimotion.
 Original project: https://github.com/TonyJiangWJ/mimotion
@@ -16,3 +16,12 @@ The 1.1.0 release adds an isolated native WebView2 host for the online route
 editor at https://sport.gyvv.top/. The original site is loaded over HTTPS;
 its source code, domain-restricted map keys and server code are not bundled.
 Microsoft.Web.WebView2 SDK license: assets/sport_host/LICENSE-WebView2.txt.
+
+Version 1.2.0 is named move and adds an ivory/sage minimalist interface,
+native target controls, explicit goal drafts, command navigation, log filters,
+time-chip editing and coordinated browser chrome. Existing local configuration
+and worker behavior remain compatible.
+
+The application icon is a generated chibi fan illustration of Frieren from
+Frieren: Beyond Journey's End; it is not official character or application art.
+Generation provenance and prompt: assets/icon-prompt.txt.

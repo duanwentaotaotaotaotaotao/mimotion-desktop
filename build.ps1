@@ -14,10 +14,12 @@ if (-not (Test-Path -LiteralPath $buildPython)) {
 & $buildPython -m pip install -r requirements-build.txt
 if ($LASTEXITCODE -ne 0) { throw 'Unable to install dependencies.' }
 & $buildPython collect_licenses.py
+& $buildPython make_icon.py
+if ($LASTEXITCODE -ne 0) { throw 'Icon conversion failed.' }
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'sport_host_src\build-host.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'WebView2 host build failed.' }
 & $buildPython -m unittest discover -s . -p test_backend.py -v
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
-& $buildPython -m PyInstaller --noconfirm --clean --onefile --windowed --name MiMotion --icon (Join-Path $PSScriptRoot 'assets\mimotion.ico') --collect-all customtkinter --add-data ((Join-Path $PSScriptRoot 'assets')+';assets') --add-data ((Join-Path $PSScriptRoot 'LICENSE-mimotion.txt')+';.') --add-data ((Join-Path $PSScriptRoot 'NOTICE.txt')+';.') --distpath dist --workpath (Join-Path $buildRoot 'pyinstaller') --specpath $buildRoot (Join-Path $PSScriptRoot 'app.py')
+& $buildPython -m PyInstaller --noconfirm --clean --onefile --windowed --name move --icon (Join-Path $PSScriptRoot 'assets\mimotion.ico') --collect-all customtkinter --add-data ((Join-Path $PSScriptRoot 'assets')+';assets') --add-data ((Join-Path $PSScriptRoot 'LICENSE-mimotion.txt')+';.') --add-data ((Join-Path $PSScriptRoot 'NOTICE.txt')+';.') --distpath dist --workpath (Join-Path $buildRoot 'pyinstaller') --specpath $buildRoot (Join-Path $PSScriptRoot 'app.py')
 if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
-Write-Output (Join-Path $PSScriptRoot 'dist\MiMotion.exe')
+Write-Output (Join-Path $PSScriptRoot 'dist\move.exe')
