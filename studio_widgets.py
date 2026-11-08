@@ -12,6 +12,7 @@ import weakref
 from typing import Callable
 
 import customtkinter as ctk
+from PIL import Image, ImageTk
 
 
 CARD = "#FFFEFA"
@@ -21,6 +22,50 @@ SAGE = "#7E9481"
 APRICOT = SAGE  # Existing API name; the light theme uses sage as its accent.
 LAVENDER = "#B5A9C7"
 MUTED = "#818880"
+
+
+def draw_blue_flower(canvas, x, y, radius, pale=False):
+    """Five blue petals, drawn as native curves rather than a bitmap tile."""
+    fill, edge = ("#EDF2F4", "#CCDCE3") if pale else ("#D5E5EE", "#8EADBF")
+    for petal in range(5):
+        angle = petal * math.tau / 5 - math.pi / 2
+        points = []
+        for distance, offset in ((.12, -.25), (.85, -.43), (1.25, 0), (.85, .43), (.12, .25)):
+            points.extend((x + math.cos(angle + offset) * radius * distance,
+                           y + math.sin(angle + offset) * radius * distance))
+        canvas.create_polygon(*points, smooth=True, splinesteps=16, fill=fill, outline=edge, width=1)
+    canvas.create_oval(x-radius*.16, y-radius*.16, x+radius*.16, y+radius*.16,
+                       fill="#F3EDD9", outline="#CBBF9D", width=1)
+
+
+class BotanicalAccent(tk.Canvas):
+    """Quiet blue-flower linework that follows the available space."""
+    def __init__(self, master, bg=CARD, landscape=False, **kwargs):
+        super().__init__(master, bg=bg, highlightthickness=0, bd=0, takefocus=False, **kwargs)
+        self.landscape = landscape
+        self.bind("<Configure>", self.redraw)
+
+    def redraw(self, _event=None):
+        self.delete("all")
+        w, h = self.winfo_width(), self.winfo_height()
+        if w < 10 or h < 10:
+            return
+        unit = min(w / 180, h / 160) if not self.landscape else min(w / 280, h / 65)
+        if self.landscape:
+            self.create_oval(w*.35, h*.08, w*.94, h*.94, fill="#EDF2F2", outline="")
+            self.create_line(w*.05, h*.77, w*.38, h*.77, w*.62, h*.45, w*.87, h*.40,
+                             smooth=True, fill="#C0D0D2", width=1)
+            flowers = [(w*.68,h*.46,8), (w*.84,h*.34,11), (w*.92,h*.65,6)]
+        else:
+            self.create_oval(w*.12,h*.18,w*.88,h*.96,fill="#E8EFED",outline="")
+            flowers = [(w*.43,h*.28,12),(w*.65,h*.43,9),(w*.29,h*.56,7)]
+            for x,y,r in flowers:
+                self.create_line(w*.49,h*.95,w*.48,h*.67,x,y, smooth=True,fill="#9FB7AF",width=max(1,unit))
+                self.create_line(w*.48,h*.76,w*.68,h*.69,w*.62,h*.62,
+                                 smooth=True,fill="#B3C7BF",width=1)
+            self.create_line(w*.14,h*.91,w*.42,h*.98,w*.77,h*.90, smooth=True,fill="#C0CED0",width=1)
+        for x,y,r in flowers:
+            draw_blue_flower(self,x,y,r*max(.7,unit))
 
 
 def _blend(first: str, second: str, fraction: float) -> str:
@@ -83,6 +128,10 @@ class OrbitDial(tk.Canvas):
         self._last_frame = time.monotonic()
         self._geometry = (size / 2, size * .48, size * .322, size / 300)
         self._items = {}
+        self._portrait_source = None
+        self._portrait_photo = None
+        self._portrait_cache = {}
+        self._portrait_command = None
         self.bind("<Configure>", self._on_resize)
         self.bind("<Map>", self._on_map)
         self.bind("<Unmap>", self._on_unmap)
@@ -109,6 +158,40 @@ class OrbitDial(tk.Canvas):
 
     def get_value(self) -> int:
         return self._value
+
+    def set_portrait(self, image, command=None):
+        # Alpha is composited by Tk on this very canvas, so there is no opaque
+        # rectangular child window covering the arc at the image's corners.
+        self._portrait_source = image.convert("RGBA")
+        self._portrait_command = command
+        self._portrait_cache.clear()
+        self._redraw()
+
+    def _portrait_hover(self, active):
+        if self._disposed or "portrait" not in self._items:
+            return
+        pixels = max(1, round((145 if active else 139) * self._geometry[3]))
+        if pixels not in self._portrait_cache:
+            if len(self._portrait_cache) > 8:
+                self._portrait_cache.clear()
+            self._portrait_cache[pixels] = ImageTk.PhotoImage(
+                self._portrait_source.resize((pixels, pixels), Image.Resampling.LANCZOS), master=self)
+        self._portrait_photo = self._portrait_cache[pixels]
+        self.itemconfigure(self._items["portrait"], image=self._portrait_photo)
+
+    def _portrait_hit(self, x, y):
+        if self._portrait_source is None or self._portrait_photo is None:
+            return False
+        cx, cy = self.coords(self._items["portrait"])
+        size = self._portrait_photo.width()
+        px = int((x - cx + size/2) / size * self._portrait_source.width)
+        py = int((y - cy + size/2) / size * self._portrait_source.height)
+        return (0 <= px < self._portrait_source.width and 0 <= py < self._portrait_source.height
+                and self._portrait_source.getpixel((px, py))[3] > 32)
+
+    def _portrait_click(self, event):
+        if self._portrait_hit(event.x, event.y) and self._portrait_command:
+            self._portrait_command()
 
     def play_greeting(self):
         """Play one brief decorative response without changing target or state."""
@@ -258,7 +341,7 @@ class OrbitDial(tk.Canvas):
                              font=("Microsoft YaHei UI", -max(9, round(10 * unit))))
             self.create_text(cx, cy + 32 * unit, text="目标步数", fill="#9BA297",
                              font=("Microsoft YaHei UI", -max(8, round(9 * unit))))
-        else:
+        elif self._portrait_source is None:
             self.create_text(cx, cy - 30 * unit, text="目标刻度", fill=MUTED,
                              font=("Microsoft YaHei UI", -max(9, round(10 * unit))))
             self._items["number"] = self.create_text(cx, cy + 5 * unit, text="move",
@@ -269,6 +352,14 @@ class OrbitDial(tk.Canvas):
         self._items["focus"] = self.create_oval(cx - radius * 1.17, cy - radius * 1.17,
                                                  cx + radius * 1.17, cy + radius * 1.17,
                                                  outline="#8F849F", width=max(1.5, unit * 1.5), dash=(2, 5), state="hidden")
+        for dx, dy, size in ((.83,-.91,6),(-1.08,.33,5),(1.02,-.60,3.8)):
+            draw_blue_flower(self,cx+radius*dx,cy+radius*dy,size*unit)
+        if self._portrait_source is not None:
+            self._items["portrait"] = self.create_image(cx, cy-4*unit, tags="portrait")
+            self._portrait_hover(False)
+            self.tag_bind("portrait", "<Enter>", lambda _: self._portrait_hover(True))
+            self.tag_bind("portrait", "<Leave>", lambda _: self._portrait_hover(False))
+            self.tag_bind("portrait", "<Button-1>", self._portrait_click)
         # A single pale leaf and two tiny stars are quiet visual accents.
         leaf_x, leaf_y = cx + radius * 1.13, cy - radius * .83
         leaf_tone = _blend(self._background, SAGE, .30)
@@ -383,6 +474,8 @@ class OrbitDial(tk.Canvas):
         return max(0, min(self.maximum, round(raw / self.step) * self.step))
 
     def _on_press(self, event):
+        if self.find_withtag("current") and "portrait" in self.gettags("current") and self._portrait_hit(event.x, event.y):
+            return "break"
         if not self._interaction_enabled():
             return
         cx, cy, radius, _ = self._geometry

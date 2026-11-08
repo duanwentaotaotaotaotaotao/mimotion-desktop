@@ -1,4 +1,4 @@
-move 1.2.1
+move 1.2.2
 
 This application packages the user's local copy of TonyJiangWJ/mimotion.
 Original project: https://github.com/TonyJiangWJ/mimotion
@@ -32,3 +32,6 @@ dragging, page-aware save shortcuts, keyboard command selection, responsive
 log filtering and reading, redacted log copying, and protected settings drafts.
 It also adds a brief starlight response to the avatar with original short text.
 The original online route editor and upstream MiMotion attribution are retained.
+
+Version 1.2.2 adds native blue-flower linework and fixes portrait corners
+covering the target arc by compositing the RGBA portrait on the same canvas.

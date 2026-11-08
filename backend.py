@@ -20,7 +20,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 BJ = timezone(timedelta(hours=8))
 DEFAULTS = {"USER": "", "PWD": "", "MIN_STEP": "18000", "MAX_STEP": "25000",
             "NO_TIME_RATE": "True", "SLEEP_GAP": "5", "USE_CONCURRENT": "False"}

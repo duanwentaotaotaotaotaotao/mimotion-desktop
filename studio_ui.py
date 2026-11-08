@@ -11,7 +11,7 @@ import customtkinter as ctk
 from PIL import Image
 
 import backend as service
-from studio_widgets import AnimatedNumber, OrbitDial, PulseButton
+from studio_widgets import AnimatedNumber, OrbitDial, PulseButton, BotanicalAccent
 
 BG = "#F5F4EF"
 PANEL = "#FFFEFA"
@@ -104,6 +104,8 @@ class StudioInterface:
         ctk.CTkLabel(brand, text="move", text_color=INK,
                      font=ctk.CTkFont(family="Georgia", size=29, slant="italic")).pack(side="left")
         self.label(side, "每天一点，慢慢来。", 10, MUTED).grid(row=1, column=0, pady=(8, 29))
+        garden = BotanicalAccent(side, bg="#EFF2EA", width=170, height=165)
+        garden.grid(row=8, column=0, sticky="sew", padx=19, pady=(8, 0))
         for row, (key, number, title) in enumerate([
             ("overview", "01", "今日目标"), ("settings", "02", "账号设置"),
             ("logs", "03", "运行记录"), ("tasks", "04", "自动计划"),
@@ -126,6 +128,8 @@ class StudioInterface:
         top = ctk.CTkFrame(self.main, fg_color="transparent")
         top.grid(row=0, column=0, sticky="ew", padx=30, pady=(23, 19))
         top.grid_columnconfigure(0, weight=1)
+        botanical = BotanicalAccent(top, bg=BG, landscape=True)
+        botanical.place(relx=.60, rely=.5, relwidth=.30, relheight=1, anchor="center")
         self.heading = self.label(top, "今日目标", 25, bold=True, anchor="w")
         self.heading.grid(row=0, column=0, sticky="w", pady=(3, 0))
         self.subheading = self.label(top, "目标、账号与运行结果，一眼掌握。", 12, MUTED, anchor="w")
@@ -133,6 +137,7 @@ class StudioInterface:
         self.project_badge = self.label(top, "", 10, SAGE, anchor="e")
         self.project_badge.grid(row=0, column=1, sticky="e", padx=(10, 0))
         self.button(top, "切换项目", self.choose_project, width=100).grid(row=1, column=1, sticky="e", pady=(6, 0))
+        top.tk.call("lower", botanical._w, self.heading._w)
 
     def show_page(self, name):
         if self.page_transition_id:
@@ -282,12 +287,8 @@ class StudioInterface:
         art.grid_rowconfigure(0, weight=1)
         self.dial = OrbitDial(art, value=0, on_change=self.on_goal_change, bg=PANEL, size=300, show_value=False)
         self.dial.grid(row=0, column=0, sticky="nsew")
-        self.hero_portrait = ctk.CTkLabel(art, text="", image=self.avatar(139), fg_color=PANEL)
-        self.hero_portrait.place(relx=.5, rely=.455, anchor="center")
-        self.hero_portrait.configure(cursor="hand2")
-        self.hero_portrait.bind("<Button-1>", self.greet_journey)
-        self.hero_portrait.bind("<Enter>", lambda _: self.hero_portrait.configure(image=self.avatar(145)))
-        self.hero_portrait.bind("<Leave>", lambda _: self.hero_portrait.configure(image=self.avatar(139)))
+        with Image.open(Path(__file__).parent / "assets" / "mimotion.png") as portrait:
+            self.dial.set_portrait(portrait, self.greet_journey)
         self.run_progress = ctk.CTkProgressBar(hero, height=3, corner_radius=2, mode="determinate",
                                               fg_color="#E5E9E1", progress_color=ACCENT, indeterminate_speed=.7)
         self.run_progress.grid(row=1, column=0, columnspan=2, sticky="ew", padx=25, pady=(0, 13))
