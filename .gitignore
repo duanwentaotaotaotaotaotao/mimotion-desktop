@@ -1,0 +1,29 @@
+# Local accounts, tokens and application state
+.env
+.env.*
+!.env.example
+encrypted_tokens.data
+MiMotion-project.json
+.mimotion-desktop/
+data/
+logs/
+backups/
+轨迹导出/
+
+# Local builds and Python caches
+.build/
+.venv/
+venv/
+build/
+dist/
+__pycache__/
+*.py[cod]
+*.spec
+*.log
+*.tmp
+
+# Editor state
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini

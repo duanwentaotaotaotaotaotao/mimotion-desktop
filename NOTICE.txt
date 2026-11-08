@@ -1,0 +1,18 @@
+MiMotion Desktop 1.1.0
+
+This application packages the user's local copy of TonyJiangWJ/mimotion.
+Original project: https://github.com/TonyJiangWJ/mimotion
+Original license: Apache License, Version 2.0 (see LICENSE-mimotion.txt).
+
+The desktop UI, local configuration adapter, isolated worker, log redaction,
+and Windows task integration were added on 2026-11-07.
+The bundled engine.py also sets self.user_id after a fresh login; the user's
+original files were not overwritten.
+
+Third-party license texts are included in assets/THIRD-PARTY-LICENSES.txt.
+No user credentials or existing encrypted token cache are part of this package.
+
+The 1.1.0 release adds an isolated native WebView2 host for the online route
+editor at https://sport.gyvv.top/. The original site is loaded over HTTPS;
+its source code, domain-restricted map keys and server code are not bundled.
+Microsoft.Web.WebView2 SDK license: assets/sport_host/LICENSE-WebView2.txt.
