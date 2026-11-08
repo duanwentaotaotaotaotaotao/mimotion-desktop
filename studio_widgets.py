@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 import time
 import tkinter as tk
+import weakref
 from typing import Callable
 
 import customtkinter as ctk
@@ -35,6 +36,9 @@ class OrbitDial(tk.Canvas):
     ``on_change`` receives an integer from pointer/keyboard input. Calling
     ``set_value`` is silent unless ``notify=True``. ``maximum`` is the scale
     endpoint; a larger existing configuration remains visible numerically.
+
+    Arrow keys adjust by 1,000, Shift uses ``step`` for fine adjustment and
+    Control uses 10,000. Escape restores the value from before a pointer drag.
     """
 
     STATES = {
@@ -65,9 +69,16 @@ class OrbitDial(tk.Canvas):
         self._focused = False
         self._hover = False
         self._dragging = False
+        self._drag_origin = None
+        self._drag_angle = None
+        self._drag_last_angle = None
         self._disposed = False
         self._frame_id = None
         self._animation = None
+        self._greeting_started = None
+        self._greeting_duration = 1.12
+        self._greeting_items = []
+        self._greeting_key_down = False
         self._phase = 0.0
         self._last_frame = time.monotonic()
         self._geometry = (size / 2, size * .48, size * .322, size / 300)
@@ -82,6 +93,9 @@ class OrbitDial(tk.Canvas):
         self.bind("<Leave>", self._on_leave)
         self.bind("<FocusIn>", self._on_focus)
         self.bind("<FocusOut>", self._on_blur)
+        self.bind("<Escape>", self._on_escape)
+        self.bind("<KeyPress-space>", self._on_greeting_key)
+        self.bind("<KeyRelease-space>", self._on_greeting_key_release)
         for key in ("Left", "Right", "Up", "Down", "Home", "End", "Prior", "Next"):
             self.bind("<" + key + ">", self._on_key)
         self._redraw()
@@ -95,6 +109,15 @@ class OrbitDial(tk.Canvas):
 
     def get_value(self) -> int:
         return self._value
+
+    def play_greeting(self):
+        """Play one brief decorative response without changing target or state."""
+        if self._disposed or not self.winfo_ismapped():
+            return False
+        self._greeting_started = time.monotonic()
+        self._draw_dynamic()
+        self._schedule()
+        return True
 
     def set_value(self, value, animate=True, notify=False):
         if self._disposed:
@@ -115,16 +138,20 @@ class OrbitDial(tk.Canvas):
             self.on_change(new_value)
 
     def set_state(self, state: str):
+        if self._disposed:
+            return
         if state not in self.STATES:
             raise ValueError("Unknown dial state: " + state)
         if state == self._state:
             return
         self._state = state
+        if state == "running":
+            self._end_drag()
         self._draw_dynamic()
         if state == "running":
             self._last_frame = time.monotonic()
             self._schedule()
-        elif self._animation is None:
+        elif self._animation is None and self._greeting_started is None:
             self._cancel_frame()
 
     def _on_resize(self, _event=None):
@@ -132,11 +159,17 @@ class OrbitDial(tk.Canvas):
 
     def _on_map(self, _event=None):
         self._redraw()
-        if self._state == "running" or self._animation:
+        if self._state == "running" or self._animation or self._greeting_started is not None:
             self._last_frame = time.monotonic()
             self._schedule()
 
     def _on_unmap(self, _event=None):
+        self._end_drag()
+        self._focused = False
+        self._hover = False
+        self._greeting_key_down = False
+        self._greeting_started = None
+        self._hide_greeting()
         self._cancel_frame()
         self._animation = None
         self._display_value = float(self._value)
@@ -169,7 +202,7 @@ class OrbitDial(tk.Canvas):
         self._phase = (self._phase + min(clock - self._last_frame, .1) * .34) % 1
         self._last_frame = clock
         self._draw_dynamic()
-        if self._animation or self._state == "running":
+        if self._animation or self._state == "running" or self._greeting_started is not None:
             self._schedule()
 
     @staticmethod
@@ -190,6 +223,7 @@ class OrbitDial(tk.Canvas):
         cx, cy, radius = width / 2, height * .47, min(width, height) * .318
         self._geometry = cx, cy, radius, unit
         self.delete("all")
+        self._greeting_items = []
         # The scale has explicit endpoints; it is not a completion percentage.
         # Sparse ticks and a single target arc leave the center airy.
         for index in range(25):
@@ -234,7 +268,7 @@ class OrbitDial(tk.Canvas):
         self._items["activity"] = self.create_oval(0, 0, 0, 0, outline="", fill=LAVENDER)
         self._items["focus"] = self.create_oval(cx - radius * 1.17, cy - radius * 1.17,
                                                  cx + radius * 1.17, cy + radius * 1.17,
-                                                 outline="#DED7E6", width=max(1, unit), dash=(1, 5), state="hidden")
+                                                 outline="#8F849F", width=max(1.5, unit * 1.5), dash=(2, 5), state="hidden")
         # A single pale leaf and two tiny stars are quiet visual accents.
         leaf_x, leaf_y = cx + radius * 1.13, cy - radius * .83
         leaf_tone = _blend(self._background, SAGE, .30)
@@ -252,6 +286,15 @@ class OrbitDial(tk.Canvas):
             color = _blend(self._background, LAVENDER, .36)
             self.create_line(x - length * unit, y, x + length * unit, y, fill=color, width=max(1, unit * .7))
             self.create_line(x, y - length * unit, x, y + length * unit, fill=color, width=max(1, unit * .7))
+        for index, (angle, distance) in enumerate(((-108, 1.23), (-46, .68), (38, 1.18), (117, .70), (164, 1.17))):
+            color = LAVENDER if index % 2 == 0 else SAGE
+            if index % 2 == 0:
+                first = self.create_line(0, 0, 0, 0, fill=color, width=max(1, unit * .7), state="hidden")
+                second = self.create_line(0, 0, 0, 0, fill=color, width=max(1, unit * .7), state="hidden")
+                self._greeting_items.append(("star", angle, distance, color, first, second))
+            else:
+                leaf = self.create_polygon(0, 0, 0, 0, 0, 0, fill=color, outline="", state="hidden")
+                self._greeting_items.append(("leaf", angle, distance, color, leaf))
         self._draw_dynamic()
 
     def _draw_dynamic(self):
@@ -272,6 +315,10 @@ class OrbitDial(tk.Canvas):
             self.itemconfigure(self._items["number"], text=f"{round(self._display_value):,}")
         if self._state == "idle" and self._value > self.maximum:
             caption = "当前目标超出刻度"
+        elif self._state == "idle" and self._dragging:
+            caption = f"{self._value:,} 步 · 松开完成"
+        elif self._state == "idle" and self._focused:
+            caption = "方向键调整 · Shift 微调"
         self.itemconfigure(self._items["caption"], text=caption, fill=color if self._state != "idle" else MUTED)
         self.itemconfigure(self._items["focus"], state="normal" if self._focused else "hidden")
         if self._state == "running":
@@ -281,34 +328,140 @@ class OrbitDial(tk.Canvas):
             self.itemconfigure(self._items["activity"], state="normal", fill=color)
         else:
             self.itemconfigure(self._items["activity"], state="hidden")
+        self._draw_greeting()
+
+    def _hide_greeting(self):
+        if self._disposed:
+            return
+        for particle in self._greeting_items:
+            for item in particle[4:]:
+                self.itemconfigure(item, state="hidden")
+
+    def _draw_greeting(self):
+        if self._greeting_started is None:
+            self._hide_greeting()
+            return
+        progress = (time.monotonic() - self._greeting_started) / self._greeting_duration
+        if progress >= 1:
+            self._greeting_started = None
+            self._hide_greeting()
+            return
+        cx, cy, radius, unit = self._geometry
+        envelope = math.sin(max(0, progress) * math.pi)
+        for particle in self._greeting_items:
+            kind, angle, distance, tone = particle[:4]
+            x, y = self._point(cx, cy, radius * (distance + progress * .055), angle)
+            y -= progress * unit * 8
+            color = _blend(self._background, tone, envelope * .62)
+            if kind == "star":
+                horizontal, vertical = particle[4:]
+                arm = (1.2 + envelope * 2.4) * unit
+                self.coords(horizontal, x - arm, y, x + arm, y)
+                self.coords(vertical, x, y - arm, x, y + arm)
+                self.itemconfigure(horizontal, fill=color, state="normal")
+                self.itemconfigure(vertical, fill=color, state="normal")
+            else:
+                leaf = particle[4]
+                size = (1 + envelope * 1.6) * unit
+                self.coords(leaf, x - size, y + size * 1.3, x - size * .8, y - size * .5,
+                            x + size, y - size * 1.3, x + size * .8, y + size * .5)
+                self.itemconfigure(leaf, fill=color, state="normal")
 
     def _pointer_value(self, x, y):
         cx, cy, _, _ = self._geometry
         angle = math.degrees(math.atan2(x - cx, -(y - cy)))
+        if self._dragging and self._drag_last_angle is not None:
+            # Keep a continuous physical angle when the pointer crosses ±180°.
+            # Clamping only the mapped angle prevents max -> zero jumps in
+            # the empty sector below the dial.
+            delta = (angle - self._drag_last_angle + 180) % 360 - 180
+            self._drag_angle += delta
+            self._drag_last_angle = angle
+            angle = self._drag_angle
         angle = min(135, max(-135, angle))
         raw = ((angle + 135) / 270) * self.maximum
         return max(0, min(self.maximum, round(raw / self.step) * self.step))
 
     def _on_press(self, event):
+        if not self._interaction_enabled():
+            return
         cx, cy, radius, _ = self._geometry
         distance = math.hypot(event.x - cx, event.y - cy)
         if not radius * .64 <= distance <= radius * 1.35:
             return
+        angle = math.degrees(math.atan2(event.x - cx, -(event.y - cy)))
+        if abs(angle) > 142:
+            return  # The gap is not an invisible click target.
         self.focus_set()  # Only an explicit pointer action requests focus.
+        self._drag_origin = self._value
         self._dragging = True
+        self._drag_angle = angle
+        self._drag_last_angle = angle
+        try:
+            self.grab_set()  # Local grab; release still arrives outside the ring.
+        except tk.TclError:
+            pass
         self.set_value(self._pointer_value(event.x, event.y), animate=False, notify=True)
         return "break"
 
     def _on_drag(self, event):
-        if self._dragging:
+        if self._dragging and self._interaction_enabled():
+            cx, cy, radius, _ = self._geometry
+            if math.hypot(event.x - cx, event.y - cy) < radius * .40:
+                return "break"  # Angle is undefined near the center.
             self.set_value(self._pointer_value(event.x, event.y), animate=False, notify=True)
             return "break"
 
     def _on_release(self, _event):
-        self._dragging = False
+        if self._disposed:
+            return
+        self._end_drag()
         self._draw_dynamic()
 
+    def _end_drag(self, restore=False):
+        original = self._drag_origin
+        self._dragging = False
+        self._drag_origin = None
+        self._drag_angle = None
+        self._drag_last_angle = None
+        try:
+            if self.grab_current() is self:
+                self.grab_release()
+        except tk.TclError:
+            pass
+        if restore and original is not None and not self._disposed:
+            self.set_value(original, animate=False, notify=True)
+
+    def _on_escape(self, _event=None):
+        if self._disposed or not self._dragging:
+            return
+        self._end_drag(restore=True)
+        self._draw_dynamic()
+        return "break"
+
+    def _on_greeting_key(self, event):
+        if self._disposed or getattr(event, "state", 0) & (0x4 | 0x8 | 0x20000):
+            return
+        if not self._greeting_key_down:
+            self._greeting_key_down = True
+            self.play_greeting()
+        return "break"
+
+    def _on_greeting_key_release(self, _event=None):
+        self._greeting_key_down = False
+        return "break"
+
+    def _interaction_enabled(self):
+        if self._disposed or self._state == "running":
+            return False
+        try:
+            return self.cget("state") != "disabled"
+        except tk.TclError:
+            return False
+
     def _on_motion(self, event):
+        if not self._interaction_enabled():
+            return
         cx, cy, radius, _ = self._geometry
         hover = radius * .64 <= math.hypot(event.x - cx, event.y - cy) <= radius * 1.35
         if hover != self._hover:
@@ -320,15 +473,30 @@ class OrbitDial(tk.Canvas):
         self._draw_dynamic()
 
     def _on_focus(self, _event):
+        if self._disposed:
+            return
         self._focused = True
         self._draw_dynamic()
 
     def _on_blur(self, _event):
+        if self._disposed:
+            return
+        self._greeting_key_down = False
+        self._end_drag()
         self._focused = False
         self._draw_dynamic()
 
     def _on_key(self, event):
-        step = 100 if event.state & 0x1 else 1000
+        if not self._interaction_enabled():
+            return "break"
+        modifiers = getattr(event, "state", 0)
+        if modifiers & (0x8 | 0x20000):
+            return  # Preserve operating-system Alt shortcuts.
+        if event.keysym not in ("Right", "Up", "Left", "Down", "Prior", "Next", "Home", "End"):
+            return
+        step = self.step if modifiers & 0x1 else max(1000, self.step)
+        if modifiers & 0x4 and not modifiers & 0x1:
+            step = max(10000, self.step * 10)
         if event.keysym in ("Right", "Up"):
             value = self._value + step
         elif event.keysym in ("Left", "Down"):
@@ -345,7 +513,11 @@ class OrbitDial(tk.Canvas):
         return "break"
 
     def destroy(self):
+        if self._disposed:
+            return
+        self._end_drag()
         self._disposed = True
+        self._greeting_started = None
         self._cancel_frame()
         super().destroy()
 
@@ -408,11 +580,24 @@ class AnimatedNumber(ctk.CTkLabel):
 
 
 class PulseButton(ctk.CTkButton):
-    """Normal CTkButton API with a restrained animated hover outline."""
+    """CTkButton-compatible control with visible focus and quiet feedback.
+
+    Tab reaches the underlying canvas once. Space and Return activate once on
+    release, including icon-only controls. Native click animations are replaced
+    with the tracked outline timer so destroying a clicked button is safe.
+    """
     def __init__(self, master, pulse_color=APRICOT, **kwargs):
         self._pulse_disposed = False
+        self._pulse_ready = False
         self._pulse_after = None
         self._pulse_hover = False
+        self._pulse_focus = False
+        self._pulse_mouse_pressed = False
+        self._pulse_pressed_key = None
+        self._pulse_destination = None
+        self._pulse_bound_widgets = weakref.WeakSet()
+        self._pulse_takefocus = kwargs.pop("takefocus", True)
+        focus_color = kwargs.pop("focus_color", TEXT)
         self._pulse_color = pulse_color
         kwargs.setdefault("border_width", 1)
         base_border = kwargs.get("fg_color", CARD)
@@ -421,9 +606,13 @@ class PulseButton(ctk.CTkButton):
         kwargs.setdefault("border_color", base_border)
         super().__init__(master, **kwargs)
         self._pulse_base = self._resolve_color(self.cget("border_color"))
+        self._pulse_base_width = self.cget("border_width")
         self._pulse_current = self._pulse_base
-        self.bind("<Enter>", self._pulse_enter, add="+")
-        self.bind("<Leave>", self._pulse_leave, add="+")
+        self._pulse_color = self._resolve_color(pulse_color)
+        self._pulse_focus_color = self._resolve_color(focus_color)
+        self._pulse_ready = True
+        self._install_input_bindings()
+        self._sync_takefocus()
 
     def _resolve_color(self, color):
         if isinstance(color, (tuple, list)):
@@ -432,21 +621,209 @@ class PulseButton(ctk.CTkButton):
             return color
         return CARD
 
+    def _input_widgets(self):
+        return [widget for widget in (getattr(self, "_canvas", None), getattr(self, "_text_label", None),
+                                      getattr(self, "_image_label", None)) if widget is not None]
+
+    def _input_hooks(self):
+        return {
+            "<Enter>": self._pulse_enter, "<Leave>": self._pulse_leave,
+            "<FocusIn>": self._pulse_focus_in, "<FocusOut>": self._pulse_focus_out,
+            "<ButtonPress-1>": self._pulse_mouse_press,
+            "<KeyPress-space>": self._pulse_key_press, "<KeyRelease-space>": self._pulse_key_release,
+            "<KeyPress-Return>": self._pulse_key_press, "<KeyRelease-Return>": self._pulse_key_release,
+            "<KeyPress-KP_Enter>": self._pulse_key_press, "<KeyRelease-KP_Enter>": self._pulse_key_release,
+            "<Escape>": self._pulse_escape, "<Unmap>": self._pulse_unmap,
+        }
+
+    def _install_input_bindings(self):
+        if not self._pulse_ready or self._pulse_disposed:
+            return
+        for widget in self._input_widgets():
+            if widget in self._pulse_bound_widgets:
+                continue
+            for sequence, callback in self._input_hooks().items():
+                widget.bind(sequence, callback, add="+")
+            if widget is not self._canvas:
+                widget.configure(takefocus=False)
+            self._pulse_bound_widgets.add(widget)
+
+    def _draw(self, no_color_updates=False):
+        super()._draw(no_color_updates)
+        if getattr(self, "_pulse_ready", False):
+            self._install_input_bindings()
+
+    def _enabled(self):
+        return not self._pulse_disposed and self.cget("state") != "disabled"
+
+    def _sync_takefocus(self):
+        enabled = self._enabled() and self._pulse_takefocus not in (False, 0, "0", "false", "False", "")
+        self._canvas.configure(takefocus=bool(enabled))
+        for widget in self._input_widgets():
+            if widget is not self._canvas:
+                widget.configure(takefocus=False)
+
+    def configure(self, require_redraw=False, **kwargs):
+        ready = getattr(self, "_pulse_ready", False)
+        if "takefocus" in kwargs:
+            self._pulse_takefocus = kwargs.pop("takefocus")
+        if ready:
+            if "border_color" in kwargs:
+                self._pulse_base = self._resolve_color(kwargs["border_color"])
+            if "border_width" in kwargs:
+                self._pulse_base_width = kwargs["border_width"]
+        super().configure(require_redraw=require_redraw, **kwargs)
+        if ready and not self._pulse_disposed:
+            self._pulse_current = self._resolve_color(self.cget("border_color"))
+            if not self._enabled():
+                self._pulse_pressed_key = None
+                self._pulse_mouse_pressed = False
+                self._pulse_hover = False
+                self._mouse_inside = False
+            self._sync_takefocus()
+            self._install_input_bindings()
+            self._refresh_outline(animate=False)
+
+    def cget(self, attribute_name):
+        if attribute_name == "takefocus":
+            return self._pulse_takefocus
+        return super().cget(attribute_name)
+
+    def unbind(self, sequence=None, funcid=None):
+        super().unbind(sequence, funcid)
+        if self._pulse_ready and sequence in self._input_hooks():
+            for widget in self._input_widgets():
+                widget.bind(sequence, self._input_hooks()[sequence], add="+")
+
+    def focus(self):
+        return self.focus_set()
+
+    def focus_set(self):
+        if self._enabled():
+            return self._canvas.focus_set()
+
+    def focus_force(self):
+        if self._enabled():
+            return self._canvas.focus_force()
+
     def _pulse_enter(self, _event=None):
-        if self._pulse_disposed or self.cget("state") == "disabled":
+        if not self._enabled():
             return
         self._pulse_hover = True
-        self._pulse_to(self._pulse_color)
+        self._refresh_outline()
 
     def _pulse_leave(self, _event=None):
         if self._pulse_disposed:
             return
         self._pulse_hover = False
-        self._pulse_to(self._pulse_base)
+        self._refresh_outline()
 
-    def _pulse_to(self, destination):
+    def _pulse_focus_in(self, _event=None):
+        if self._pulse_disposed:
+            return
+        self._pulse_focus = True
+        self._refresh_outline(animate=False)
+
+    def _pulse_focus_out(self, _event=None):
+        if self._pulse_disposed:
+            return
+        self._pulse_focus = False
+        self._pulse_pressed_key = None
+        self._pulse_mouse_pressed = False
+        self._refresh_outline(animate=False)
+
+    def _pulse_mouse_press(self, _event=None):
+        if not self._enabled():
+            return
+        self.focus_set()
+        self._pulse_mouse_pressed = True
+        self._refresh_outline(animate=False)
+
+    def _on_release(self, _event=None):
+        # The base implementation schedules an untracked 100 ms callback before
+        # invoking the command. Commands may destroy this button immediately.
+        if self._pulse_disposed or not self._pulse_ready:
+            return
+        activate = self._pulse_mouse_pressed and self._mouse_inside and self._enabled()
+        self._pulse_mouse_pressed = False
+        self._click_animation_running = False
+        self._refresh_outline(animate=False)
+        if activate:
+            return self.invoke()  # Nothing touches the widget after its command.
+
+    @staticmethod
+    def _activation_key(event):
+        return "Return" if event.keysym == "KP_Enter" else event.keysym
+
+    def _pulse_key_press(self, event):
+        if getattr(event, "state", 0) & (0x4 | 0x8 | 0x20000):
+            return  # Preserve parent Control/Alt shortcuts.
+        if not self._enabled() or not self.winfo_ismapped():
+            return "break"
+        key = self._activation_key(event)
+        if self._pulse_pressed_key is None:
+            self._pulse_pressed_key = key
+            self._refresh_outline(animate=False)
+        return "break"
+
+    def _pulse_key_release(self, event):
+        if getattr(event, "state", 0) & (0x4 | 0x8 | 0x20000):
+            return
+        key = self._activation_key(event)
+        activate = self._pulse_pressed_key == key and self._enabled() and self.winfo_ismapped()
+        self._pulse_pressed_key = None
+        if not self._pulse_disposed:
+            self._refresh_outline(animate=False)
+        if activate:
+            self.invoke()
+        return "break"
+
+    def _pulse_escape(self, _event=None):
+        if self._pulse_pressed_key is None and not self._pulse_mouse_pressed:
+            return
+        self._pulse_pressed_key = None
+        self._pulse_mouse_pressed = False
+        self._refresh_outline(animate=False)
+        return "break"
+
+    def _pulse_unmap(self, _event=None):
+        if self._pulse_disposed:
+            return
+        self._pulse_focus = False
+        self._pulse_hover = False
+        self._pulse_mouse_pressed = False
+        self._pulse_pressed_key = None
+        self._refresh_outline(animate=False)
+
+    def _refresh_outline(self, animate=True):
+        if not self._pulse_ready or self._pulse_disposed:
+            return
+        focused = self._pulse_focus and self._enabled()
+        pressed = self._pulse_pressed_key is not None or (self._pulse_mouse_pressed and self._pulse_hover)
+        hovered = self._pulse_hover and self._enabled()
+        destination = self._pulse_focus_color if focused or pressed else (self._pulse_color if hovered else self._pulse_base)
+        width = max(self._pulse_base_width, 2 if focused or pressed else (1 if hovered else 0))
+        if self.cget("border_width") != width:
+            super().configure(border_width=width)
+        self._pulse_to(destination, animate=animate and self.winfo_ismapped())
+
+    def _pulse_to(self, destination, animate=True):
+        if self._pulse_disposed:
+            return
+        destination = self._resolve_color(destination)
+        if animate and self._pulse_after and self._pulse_destination == destination:
+            return
         if self._pulse_after:
-            self.after_cancel(self._pulse_after)
+            try:
+                self.after_cancel(self._pulse_after)
+            except tk.TclError:
+                pass
+            self._pulse_after = None
+        self._pulse_destination = destination
+        if not animate or self._pulse_current == destination:
+            self._pulse_current = destination
+            super().configure(border_color=destination)
+            return
         began, initial = time.monotonic(), self._pulse_current
 
         def tick():
@@ -454,15 +831,21 @@ class PulseButton(ctk.CTkButton):
             if self._pulse_disposed:
                 return
             fraction = min(1, (time.monotonic() - began) / .12)
-            self._pulse_current = _blend(initial, destination, 1 - (1 - fraction) ** 2)
-            self.configure(border_color=self._pulse_current)
+            self._pulse_current = (destination if fraction >= 1 else
+                                   _blend(initial, destination, 1 - (1 - fraction) ** 2))
+            super(PulseButton, self).configure(border_color=self._pulse_current)
             if fraction < 1:
                 self._pulse_after = self.after(20, tick)
         tick()
 
     def destroy(self):
+        if self._pulse_disposed:
+            return
         self._pulse_disposed = True
         if self._pulse_after:
-            self.after_cancel(self._pulse_after)
+            try:
+                self.after_cancel(self._pulse_after)
+            except tk.TclError:
+                pass
             self._pulse_after = None
         super().destroy()

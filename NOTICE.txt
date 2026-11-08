@@ -1,4 +1,4 @@
-move 1.2.0
+move 1.2.1
 
 This application packages the user's local copy of TonyJiangWJ/mimotion.
 Original project: https://github.com/TonyJiangWJ/mimotion
@@ -25,3 +25,10 @@ and worker behavior remain compatible.
 The application icon is a generated chibi fan illustration of Frieren from
 Frieren: Beyond Journey's End; it is not official character or application art.
 Generation provenance and prompt: assets/icon-prompt.txt.
+
+Version 1.2.1 refines the existing interface with exact integer goal entry,
+restoring saved goals, keyboard and continuous dial interaction, reversible
+dragging, page-aware save shortcuts, keyboard command selection, responsive
+log filtering and reading, redacted log copying, and protected settings drafts.
+It also adds a brief starlight response to the avatar with original short text.
+The original online route editor and upstream MiMotion attribution are retained.

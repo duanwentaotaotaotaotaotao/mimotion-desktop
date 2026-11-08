@@ -5,6 +5,7 @@ import math
 import time
 import tkinter as tk
 from pathlib import Path
+from tkinter import messagebox
 
 import customtkinter as ctk
 from PIL import Image
@@ -43,12 +44,26 @@ class StudioInterface:
         self.pending_task_revision = None
         self.suppress_task_trace = False
         self.selected_log_name = None
+        self.settings_dirty = False
+        self.settings_building = False
+        self.settings_syncing = False
+        self.settings_baseline = None
+        self.last_synced_steps = None
+        self.removed_accounts = []
+        self.log_search_id = None
+        self.log_buttons = {}
+        self.displayed_log = None
+        self.goal_editor = None
         super().__init__(project, demo)
         self.title("move" + (" · 离线演示" if demo else ""))
         self.geometry("1280x860")
         self.minsize(1120, 760)
         self.bind("<Control-k>", self.open_command_palette)
         self.bind("<Control-K>", self.open_command_palette)
+        self.bind("<Control-s>", self.save_current_page)
+        self.bind("<Control-S>", self.save_current_page)
+        self.bind("<Control-f>", self.focus_log_search)
+        self.bind("<Control-F>", self.focus_log_search)
         self.bind("<Configure>", self.resize_overview, add="+")
 
     @staticmethod
@@ -165,6 +180,10 @@ class StudioInterface:
             self.toast_clear_id = self.after(6500, lambda: self.toast.configure(text="") if not self.closing else None)
 
     def choose_project(self):
+        if self.process:
+            return super().choose_project()
+        if not self._confirm_discard("切换项目"):
+            return
         old = self.project
         super().choose_project()
         if self.project != old:
@@ -172,7 +191,37 @@ class StudioInterface:
             self.quick_goal = None
             self.tasks_dirty = False
             self.task_revision = 0
+            self.settings_dirty = False
+            self.settings_baseline = self.last_synced_steps = None
+            self.removed_accounts.clear()
+            self.selected_log_name = self.displayed_log = None
+            self.update_draft_indicators()
             self.update_overview()
+
+    def update_draft_indicators(self):
+        dirty = {"overview": self.goal_dirty, "settings": self.settings_dirty, "tasks": self.tasks_dirty}
+        for key, title in (("overview", "今日目标"), ("settings", "账号设置"), ("logs", "运行记录"),
+                           ("tasks", "自动计划"), ("sport", "运动路线")):
+            if key in self.nav:
+                self.nav[key].configure(text=title + ("  ·" if dirty.get(key) else ""))
+
+    def _confirm_discard(self, reason, scopes=("overview", "settings", "tasks")):
+        names = [title for key, dirty, title in (("overview", self.goal_dirty, "首页目标"),
+                 ("settings", self.settings_dirty, "账号设置"), ("tasks", self.tasks_dirty, "计划时间"))
+                 if key in scopes and dirty]
+        return not names or messagebox.askokcancel(
+            "还有未保存的修改", "、".join(names) + "尚未保存。\n" + reason + "会放弃这些修改，是否继续？\n\n取消后可在对应页面按 Ctrl+S 保存。", parent=self)
+
+    def save_current_page(self, event=None):
+        if self.palette and self.palette.winfo_exists() or self.goal_editor and self.goal_editor.winfo_exists():
+            return "break"
+        action = {"overview": self.save_quick_goal, "settings": self.save_settings,
+                  "tasks": self.save_task_clicked}.get(self.current_page)
+        if action:
+            action()
+        else:
+            self.notify("当前页面无需保存。")
+        return "break"
 
     def build_overview(self, frame):
         frame.grid_rowconfigure(2, weight=1)
@@ -188,7 +237,9 @@ class StudioInterface:
         self.label(eyebrow, "设定目标", 11, MUTED).pack(side="left")
         self.run_status = self.label(eyebrow, "准备就绪", 10, SAGE)
         self.run_status.pack(side="right", padx=(12, 0))
-        self.label(left, "给今天，一个小小的目标。", 19, INK).grid(row=1, column=0, sticky="w", pady=(12, 0))
+        self.journey_line = self.label(left, "给今天，一个小小的目标。", 19, INK)
+        self.journey_line.grid(row=1, column=0, sticky="w", pady=(12, 0))
+        self.journey_index = 0
         number_line = ctk.CTkFrame(left, fg_color="transparent")
         number_line.grid(row=2, column=0, sticky="ew", pady=(0, 0))
         self.goal_label = AnimatedNumber(number_line, value=0, text_color=INK,
@@ -196,6 +247,9 @@ class StudioInterface:
         self.goal_label.pack(side="left")
         self.goal_unit = self.label(number_line, "步 · 设定目标", 11, MUTED)
         self.goal_unit.pack(side="left", padx=(10, 0), pady=(22, 0))
+        self.goal_edit_button = self.button(number_line, "精确输入", self.open_goal_editor, width=78)
+        self.goal_edit_button.configure(height=28, font=self.font(10))
+        self.goal_edit_button.pack(side="left", padx=(13, 0), pady=(20, 0))
         self.goal_note = self.label(left, "", 11, MUTED, anchor="w")
         self.goal_note.grid(row=3, column=0, sticky="w", pady=(0, 8))
         self.goal_slider = ctk.CTkSlider(left, from_=0, to=100000, number_of_steps=200,
@@ -211,6 +265,9 @@ class StudioInterface:
             button.configure(height=28, corner_radius=9, font=self.font(11))
             button.pack(side="left", padx=(0, 7))
             self.goal_presets[value] = button
+        self.restore_goal_button = self.button(presets, "还原", self.restore_quick_goal, width=55, state="disabled")
+        self.restore_goal_button.configure(height=28, font=self.font(10))
+        self.restore_goal_button.pack(side="left", padx=(3, 0))
         actions = ctk.CTkFrame(left, fg_color="transparent")
         actions.grid(row=6, column=0, sticky="ew")
         self.run_button = self.button(actions, "立即运行  ↗", self.start_run, primary=True, width=143)
@@ -227,6 +284,10 @@ class StudioInterface:
         self.dial.grid(row=0, column=0, sticky="nsew")
         self.hero_portrait = ctk.CTkLabel(art, text="", image=self.avatar(139), fg_color=PANEL)
         self.hero_portrait.place(relx=.5, rely=.455, anchor="center")
+        self.hero_portrait.configure(cursor="hand2")
+        self.hero_portrait.bind("<Button-1>", self.greet_journey)
+        self.hero_portrait.bind("<Enter>", lambda _: self.hero_portrait.configure(image=self.avatar(145)))
+        self.hero_portrait.bind("<Leave>", lambda _: self.hero_portrait.configure(image=self.avatar(139)))
         self.run_progress = ctk.CTkProgressBar(hero, height=3, corner_radius=2, mode="determinate",
                                               fg_color="#E5E9E1", progress_color=ACCENT, indeterminate_speed=.7)
         self.run_progress.grid(row=1, column=0, columnspan=2, sticky="ew", padx=25, pady=(0, 13))
@@ -278,6 +339,12 @@ class StudioInterface:
         open_map.configure(height=31, fg_color="#EEE8F3", text_color="#7E738F", hover_color="#E5DCEE")
         open_map.pack(anchor="w", padx=21, pady=(0, 16))
 
+    def greet_journey(self, event=None):
+        lines = ("给今天，一个小小的目标。", "风会停下，旅途还会继续。", "走过的每一步，都算数。", "慢慢走，也会到达。")
+        self.journey_index = (self.journey_index + 1) % len(lines)
+        self.journey_line.configure(text=lines[self.journey_index], text_color=LAVENDER)
+        self.dial.play_greeting()
+
     def resize_overview(self, event=None):
         if event is not None and event.widget is not self:
             return
@@ -295,23 +362,110 @@ class StudioInterface:
         except (TypeError, ValueError):
             return 25000
 
-    def _sync_step_fields(self):
-        if "settings" in self.pages and self.quick_goal is not None:
-            self.mode.set("固定步数")
-            self.min_value.set(str(self.quick_goal))
-            self.max_value.set(str(self.quick_goal))
-            self.change_mode("固定步数")
+    def _settings_steps(self):
+        mode = self.mode.get()
+        return mode, self.min_value.get(), self.min_value.get() if mode == "固定步数" else self.max_value.get()
+
+    def _sync_step_fields(self, from_config=False):
+        if "settings" not in self.pages or self.quick_goal is None:
+            return
+        # A target preview must not erase a separately edited random range.
+        if self.last_synced_steps is not None and self._settings_steps() != self.last_synced_steps:
+            return
+        self.settings_syncing = True
+        try:
+            minimum = str(self.config_data["MIN_STEP"]) if from_config else str(self.quick_goal)
+            maximum = str(self.config_data["MAX_STEP"]) if from_config else str(self.quick_goal)
+            self.mode.set("固定步数" if minimum == maximum else "随机范围")
+            self.min_value.set(minimum)
+            self.max_value.set(maximum)
+            self.change_mode(self.mode.get())
+            self.last_synced_steps = self._settings_steps()
+            if self.settings_baseline is not None:
+                self.settings_baseline = (self.last_synced_steps, *self.settings_baseline[1:])
+        finally:
+            self.settings_syncing = False
+        self.settings_changed()
 
     def on_goal_change(self, value):
         if self.process:
             self.dial.set_value(self.quick_goal, animate=False)
             return
-        goal = max(0, min(999999, int(round(float(value) / 100) * 100)))
+        goal = max(0, min(999999, int(round(float(value)))))
         self.quick_goal = goal
         self.execution_state = "idle"
         self.goal_dirty = str(goal) != str(self.config_data.get("MIN_STEP")) or str(goal) != str(self.config_data.get("MAX_STEP"))
         self._sync_step_fields()
         self.update_overview()
+
+    def restore_quick_goal(self):
+        if self.process:
+            return
+        self.goal_dirty = False
+        self.quick_goal = self._config_goal()
+        self._sync_step_fields(from_config=True)
+        self.update_overview()
+        self.notify("已还原保存的目标，配置文件未改动。")
+
+    def open_goal_editor(self):
+        if self.process:
+            return
+        if self.goal_editor and self.goal_editor.winfo_exists():
+            self.goal_editor.lift()
+            return
+        self.goal_editor_focus = self.focus_get()
+        box = ctk.CTkToplevel(self)
+        self.goal_editor = box
+        box.title("move · 精确目标")
+        box.geometry("420x280")
+        box.resizable(False, False)
+        box.transient(self)
+        box.configure(fg_color=BG)
+        box.grab_set()
+        self.label(box, "想走多少步？", 22, bold=True).pack(anchor="w", padx=25, pady=(23, 5))
+        self.label(box, "先预览，点击首页保存后生效。", 11, MUTED).pack(anchor="w", padx=25)
+        self.goal_input_var = ctk.StringVar(value=str(self.quick_goal))
+        self.goal_input_entry = ctk.CTkEntry(box, textvariable=self.goal_input_var, height=45,
+                                            font=self.font(23), fg_color=PANEL, border_color=BORDER, text_color=INK)
+        self.goal_input_entry.pack(fill="x", padx=25, pady=(17, 5))
+        self.goal_input_error = self.label(box, "0–999,999 之间的整数", 10, MUTED)
+        self.goal_input_error.pack(anchor="w", padx=25)
+        actions = ctk.CTkFrame(box, fg_color="transparent")
+        actions.pack(fill="x", padx=25, pady=(15, 20))
+        self.button(actions, "应用预览", self.apply_goal_input, primary=True, width=110).pack(side="right")
+        self.button(actions, "取消", self.close_goal_editor, width=85).pack(side="right", padx=9)
+        box.bind("<Escape>", lambda _: self.close_goal_editor())
+        self.goal_input_entry.bind("<Return>", lambda _: self.apply_goal_input())
+        box.protocol("WM_DELETE_WINDOW", self.close_goal_editor)
+        self.after(90, self._focus_goal_input)
+
+    def _focus_goal_input(self):
+        if self.goal_editor and self.goal_editor.winfo_exists():
+            self.goal_input_entry.focus_set()
+            self.goal_input_entry.select_range(0, "end")
+
+    def apply_goal_input(self):
+        try:
+            goal = service.parse_int(self.goal_input_var.get().strip(), "目标步数", 0, 999999)
+        except ValueError as exc:
+            self.goal_input_entry.configure(border_color=RED)
+            self.goal_input_error.configure(text=str(exc), text_color=RED)
+            self.goal_input_entry.focus_set()
+            return False
+        if self.process:
+            self.close_goal_editor()
+            return False
+        self.on_goal_change(goal)
+        self.close_goal_editor()
+        return True
+
+    def close_goal_editor(self):
+        if self.goal_editor:
+            self.goal_editor.destroy()
+            self.goal_editor = None
+        previous = getattr(self, "goal_editor_focus", None)
+        if previous and previous.winfo_exists():
+            previous.focus_set()
 
     def save_quick_goal(self):
         if self.process or self.quick_goal is None:
@@ -353,13 +507,16 @@ class StudioInterface:
         self.dial.set_value(self.quick_goal)
         state = "running" if running else self.execution_state
         self.dial.set_state(state)
-        self.run_status.configure(text="●  运行中" if running else ("●  离线演示" if self.demo else "●  准备就绪"),
-                                  text_color=ACCENT if running else SAGE)
+        status = {"success": "模拟完成" if self.demo else "本次执行完成", "error": "本次需要检查", "stopped": "本次已停止"}
+        self.run_status.configure(text="●  运行中" if running else "●  " + status.get(state, "离线演示" if self.demo else "准备就绪"),
+                                  text_color=RED if state == "error" else SAGE)
         self.run_button.configure(state="disabled" if running else "normal",
-                                  text="正在运行…" if running else ("保存并运行" if self.goal_dirty else "立即运行"))
+                                  text="正在运行…" if running else "先保存账号设置" if self.settings_dirty else ("保存并运行" if self.goal_dirty else "立即运行"))
         self.stop_button.configure(state="normal" if running else "disabled")
         self.save_goal_button.configure(state="normal" if self.goal_dirty and not running else "disabled",
                                         text="保存目标" if self.goal_dirty else "目标已保存")
+        self.restore_goal_button.configure(state="normal" if self.goal_dirty and not running else "disabled")
+        self.goal_edit_button.configure(state="disabled" if running else "normal")
         self.goal_slider.configure(state="disabled" if running else "normal")
         self.goal_slider.set(min(self.quick_goal, 100000))
         for goal, button in self.goal_presets.items():
@@ -394,11 +551,58 @@ class StudioInterface:
             self.label(self.recent_list, "●", 12, color).grid(row=row, column=0, padx=(0, 9), pady=5)
             self.label(self.recent_list, item["summary"], 11).grid(row=row, column=1, sticky="w")
             self.label(self.recent_list, item["time"], 10, MUTED).grid(row=row, column=2, sticky="e")
+        self.update_draft_indicators()
 
     def build_settings(self, frame):
+        self.settings_building = True
         super().build_settings(frame)
         if self.goal_dirty:
             self._sync_step_fields()
+        self.settings_note = self.label(frame, "", 10, MUTED, anchor="w")
+        self.settings_note.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        self.undo_account_button = self.button(self.settings_actions, "撤销删除", self.undo_remove_account,
+                                                width=95, state="disabled")
+        self.undo_account_button.pack(side="left", padx=9)
+        for variable in (self.mode, self.min_value, self.max_value, self.ramp_var, self.gap_value):
+            variable.trace_add("write", self.settings_changed)
+        self.last_synced_steps = self._settings_steps()
+        self.settings_baseline = self._settings_snapshot()
+        self.settings_building = False
+        self.settings_changed()
+
+    def _settings_snapshot(self):
+        accounts = []
+        for row in self.account_rows:
+            user = row["user"].get().strip()
+            password = row["password"].get()
+            if not password and user == row["original_user"]:
+                password = row["original_password"]
+            if user or password:
+                accounts.append((user, password))
+        return self._settings_steps(), self.ramp_var.get(), self.gap_value.get().strip(), tuple(accounts)
+
+    def settings_changed(self, *_):
+        if self.settings_building or self.settings_syncing or self.settings_baseline is None or "settings" not in self.pages:
+            return
+        self.settings_dirty = self._settings_snapshot() != self.settings_baseline
+        self.settings_note.configure(text="有未保存的修改  ·  Ctrl+S 保存" if self.settings_dirty else "设置已保存  ·  Ctrl+S 保存当前页面",
+                                     text_color=LAVENDER if self.settings_dirty else MUTED)
+        self.settings_save_button.configure(text="保存修改" if self.settings_dirty else "保存设置")
+        self.undo_account_button.configure(state="normal" if self.removed_accounts else "disabled")
+        for row in self.account_rows:
+            changed_user = row["user"].get().strip() != row["original_user"]
+            text = "新密码 · 待保存" if row["password"].get() else (
+                "账号已更改，请填写密码" if changed_user and row["original_password"] else
+                "密码 · 已保存" if row["original_password"] else "登录密码")
+            row["password_hint"].configure(text=text, text_color=LAVENDER if changed_user else SAGE if row["original_password"] else MUTED)
+            for widget in (row["user_entry"], row["password_entry"]):
+                widget.configure(border_color=BORDER)
+        self.min_entry.configure(border_color=BORDER)
+        self.max_entry.configure(border_color=BORDER)
+        self.gap_entry.configure(border_color=BORDER)
+        if "overview" in self.pages and not self.process:
+            self.run_button.configure(text="先保存账号设置" if self.settings_dirty else "保存并运行" if self.goal_dirty else "立即运行")
+        self.update_draft_indicators()
 
     def add_account(self, user="", password=""):
         if len(self.account_rows) >= 50:
@@ -411,13 +615,15 @@ class StudioInterface:
         hint = self.label(row, "密码 · 已保存" if password else "登录密码", 10, SAGE if password else MUTED)
         hint.grid(row=0, column=1, sticky="w", padx=(0, 8), pady=(8, 1))
         user_var, pass_var = ctk.StringVar(value=user), ctk.StringVar(value="")
-        ctk.CTkEntry(row, textvariable=user_var, height=38, fg_color=BG, border_color=BORDER,
-                      text_color=INK, font=self.font(12)).grid(row=1, column=0, sticky="ew", padx=(12, 10), pady=(1, 11))
+        user_entry = ctk.CTkEntry(row, textvariable=user_var, height=38, fg_color=BG, border_color=BORDER,
+                                 text_color=INK, font=self.font(12))
+        user_entry.grid(row=1, column=0, sticky="ew", padx=(12, 10), pady=(1, 11))
         password_entry = ctk.CTkEntry(row, textvariable=pass_var, show="●", height=38,
                                      fg_color=BG, border_color=BORDER, text_color=INK, font=self.font(12))
         password_entry.grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=(1, 11))
         entry = {"frame": row, "user": user_var, "password": pass_var, "original_user": user,
-                 "original_password": password, "password_entry": password_entry, "password_hint": hint}
+                 "original_password": password, "password_entry": password_entry, "password_hint": hint,
+                 "user_entry": user_entry}
         toggle = self.button(row, "显示", lambda: None, width=48)
         toggle.configure(height=34, font=self.font(10))
 
@@ -431,6 +637,95 @@ class StudioInterface:
         remove.configure(height=34, fg_color="#F3E8E5", hover_color="#ECD8D5", text_color=RED)
         remove.grid(row=1, column=3, padx=(0, 10), pady=(1, 11))
         self.account_rows.append(entry)
+        user_var.trace_add("write", self.settings_changed)
+        pass_var.trace_add("write", self.settings_changed)
+        self.settings_changed()
+        if not self.settings_building and not user:
+            user_entry.focus_set()
+
+    def remove_account(self, entry):
+        index = self.account_rows.index(entry)
+        entry["frame"].pack_forget()
+        self.account_rows.remove(entry)
+        self.removed_accounts.append((index, entry))
+        if not self.account_rows:
+            self.add_account()
+            self.account_rows[-1]["auto_placeholder"] = True
+        self.settings_changed()
+        self.notify("账号已从编辑列表移除，可点击“撤销删除”；保存后生效。")
+
+    def undo_remove_account(self):
+        if not self.removed_accounts:
+            return
+        if len(self.account_rows) >= 50:
+            self.notify("最多可添加 50 个账号，请先移除一个空行再撤销。", True)
+            return
+        index, row = self.removed_accounts.pop()
+        for placeholder in list(self.account_rows):
+            if placeholder.get("auto_placeholder") and not placeholder["user"].get() and not placeholder["password"].get():
+                placeholder["frame"].destroy()
+                self.account_rows.remove(placeholder)
+        index = min(index, len(self.account_rows))
+        options = {"before": self.account_rows[index]["frame"]} if index < len(self.account_rows) else {}
+        row["frame"].pack(fill="x", pady=(0, 10), **options)
+        self.account_rows.insert(index, row)
+        self.settings_changed()
+        row["user_entry"].focus_set()
+        self.notify("已撤销删除，账号内容已恢复。")
+
+    def _field_error(self, widget, text):
+        widget.configure(border_color=RED)
+        widget.focus_set()
+        self.update_idletasks()
+        canvas = self.settings_scroll._parent_canvas
+        bounds = canvas.bbox("all")
+        if bounds and bounds[3] > canvas.winfo_height():
+            y = canvas.canvasy(0) + widget.winfo_rooty() - canvas.winfo_rooty() - 75
+            canvas.yview_moveto(max(0, y) / bounds[3])
+        raise ValueError(text)
+
+    def collect_settings(self):
+        users = set()
+        active_rows = 0
+        for index, row in enumerate(self.account_rows, 1):
+            user, password = row["user"].get().strip(), row["password"].get()
+            if not password and user == row["original_user"]:
+                password = row["original_password"]
+            if not user and not password:
+                continue
+            active_rows += 1
+            if not user:
+                self._field_error(row["user_entry"], f"第 {index} 个账号：请填写手机号或邮箱。")
+            if not password:
+                self._field_error(row["password_entry"], f"第 {index} 个账号：请填写密码；更改账号后需要重新输入密码。")
+            if "#" in user or "#" in password:
+                self._field_error(row["user_entry"] if "#" in user else row["password_entry"], "账号和密码中不能包含 #。")
+            if any(c in password for c in ("\n", "\r", "\x00")):
+                self._field_error(row["password_entry"], f"第 {index} 个账号：密码不能包含换行或空字符。")
+            try:
+                service.validate_config({"USER": user, "PWD": password})
+            except ValueError as exc:
+                self._field_error(row["user_entry"], f"第 {index} 个账号：{exc}")
+            if user in users:
+                self._field_error(row["user_entry"], f"第 {index} 个账号重复，请移除重复账号。")
+            users.add(user)
+        if not active_rows:
+            self._field_error(self.account_rows[0]["user_entry"], "请先填写一个 Zepp Life 账号和密码。")
+        for variable, widget, title in ((self.min_value, self.min_entry, "目标步数" if self.mode.get() == "固定步数" else "最小步数"),
+                                         (self.max_value, self.max_entry, "最大步数")):
+            if widget is self.max_entry and self.mode.get() == "固定步数":
+                continue
+            try:
+                service.parse_int(variable.get().strip(), title, 0, 999999)
+            except ValueError as exc:
+                self._field_error(widget, str(exc))
+        if self.mode.get() != "固定步数" and int(self.max_value.get()) < int(self.min_value.get()):
+            self._field_error(self.max_entry, "最大步数不能小于最小步数。")
+        try:
+            service.validate_config({"USER": "demo@example.com", "PWD": "validation-only", "SLEEP_GAP": self.gap_value.get().strip()})
+        except ValueError as exc:
+            self._field_error(self.gap_entry, str(exc))
+        return super().collect_settings()
 
     def save_settings(self):
         saved = super().save_settings()
@@ -443,11 +738,22 @@ class StudioInterface:
                     row["password_hint"].configure(text="密码 · 已保存" if saved_password else "登录密码",
                                                    text_color=SAGE if saved_password else MUTED)
             self.update_overview()
+            for _, removed in self.removed_accounts:
+                removed["frame"].destroy()
+            self.removed_accounts.clear()
+            self.last_synced_steps = self._settings_steps()
+            self.settings_baseline = self._settings_snapshot()
+            self.settings_changed()
         return saved
 
     def reset_settings(self):
+        if not self._confirm_discard("重新载入", scopes=("overview", "settings")):
+            return
         self.goal_dirty = False
         self.quick_goal = None
+        self.settings_dirty = False
+        self.settings_baseline = self.last_synced_steps = None
+        self.removed_accounts.clear()
         super().reset_settings()
         self.update_overview()
 
@@ -458,12 +764,16 @@ class StudioInterface:
         toolbar.grid_columnconfigure(1, weight=1)
         self.log_search = ctk.StringVar(value="")
         self.log_filter = ctk.StringVar(value="全部")
-        search = ctk.CTkEntry(toolbar, textvariable=self.log_search, height=42, fg_color=PANEL,
-                              border_color=BORDER, corner_radius=12, text_color=INK, font=self.font(12))
+        self.log_search_entry = ctk.CTkEntry(toolbar, textvariable=self.log_search, height=42, fg_color=PANEL,
+                                            border_color=BORDER, corner_radius=12, text_color=INK, font=self.font(12))
         self.label(toolbar, "搜索日志", 11, MUTED).grid(row=0, column=0, padx=(0, 12))
-        search.grid(row=0, column=1, sticky="ew", padx=(0, 12))
-        self.button(toolbar, "刷新", self.refresh_logs, width=78).grid(row=0, column=2, padx=(0, 8))
-        self.button(toolbar, "日志文件夹 ↗", self.open_logs_folder, width=128).grid(row=0, column=3)
+        self.log_search_entry.grid(row=0, column=1, sticky="ew", padx=(0, 8))
+        self.log_search_entry.bind("<Escape>", lambda _: self.clear_log_filters())
+        self.log_search_entry.bind("<Return>", lambda _: self.render_logs())
+        self.clear_log_button = self.button(toolbar, "清除", self.clear_log_filters, width=60, state="disabled")
+        self.clear_log_button.grid(row=0, column=2, padx=(0, 8))
+        self.button(toolbar, "刷新", self.refresh_logs, width=65).grid(row=0, column=3, padx=(0, 8))
+        self.button(toolbar, "日志文件夹 ↗", self.open_logs_folder, width=115).grid(row=0, column=4)
         filters = ctk.CTkFrame(frame, fg_color="transparent")
         filters.grid(row=1, column=0, sticky="ew", pady=(0, 13))
         ctk.CTkSegmentedButton(filters, values=["全部", "成功", "失败", "停止"], variable=self.log_filter,
@@ -487,11 +797,40 @@ class StudioInterface:
         reader.grid_rowconfigure(1, weight=1)
         self.log_title = self.label(reader, "选择一条记录", 12, bold=True, anchor="w")
         self.log_title.grid(row=0, column=0, sticky="ew", padx=19, pady=(18, 10))
+        self.copy_log_button = self.button(reader, "复制记录", self.copy_selected_log, width=85, state="disabled")
+        self.copy_log_button.configure(height=28, font=self.font(10))
+        self.copy_log_button.grid(row=0, column=1, padx=(0, 18), pady=(13, 9))
         self.log_text = ctk.CTkTextbox(reader, fg_color=PANEL, text_color="#3E4944", wrap="word",
                                       font=self.font(12), corner_radius=0)
-        self.log_text.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 13))
+        self.log_text.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=14, pady=(0, 13))
         self.log_text.configure(state="disabled")
-        self.log_search.trace_add("write", lambda *_: self.render_logs())
+        self.log_search.trace_add("write", self.schedule_log_search)
+
+    def focus_log_search(self, event=None):
+        if self.palette and self.palette.winfo_exists() or self.goal_editor and self.goal_editor.winfo_exists():
+            return "break"
+        self.show_page("logs")
+        self.log_search_entry.focus_set()
+        self.log_search_entry.select_range(0, "end")
+        return "break"
+
+    def schedule_log_search(self, *_):
+        if self.log_search_id:
+            self.after_cancel(self.log_search_id)
+        self.log_search_id = self.after(150, self.render_logs)
+
+    def clear_log_filters(self):
+        self.log_search.set("")
+        self.log_filter.set("全部")
+        self.render_logs()
+        self.log_search_entry.focus_set()
+        return "break"
+
+    def copy_selected_log(self):
+        if self.displayed_log:
+            self.clipboard_clear()
+            self.clipboard_append(self.displayed_log[1])
+            self.notify("记录已复制，账号和敏感信息已隐藏。")
 
     def refresh_logs(self):
         self.logs = service.log_entries(self.project, self.config_data)
@@ -506,22 +845,31 @@ class StudioInterface:
                 and (not query or query in (item["name"] + item["summary"] + item["text"]).casefold())]
 
     def render_logs(self):
+        if self.log_search_id:
+            self.after_cancel(self.log_search_id)
+            self.log_search_id = None
         if "logs" not in self.pages or not hasattr(self, "log_list"):
             return
         rows = self.filtered_logs()
         for child in self.log_list.winfo_children():
             child.destroy()
+        self.log_buttons.clear()
         self.log_count.configure(text=f"{len(rows)} 条匹配  /  共 {len(self.logs)} 条")
+        self.clear_log_button.configure(state="normal" if self.log_search.get() or self.log_filter.get() != "全部" else "disabled")
         for index, item in enumerate(rows):
             color = SAGE if item["state"] == "success" else RED if item["state"] == "failed" else MUTED
             button = self.button(self.log_list, f"{item['time']}\n{item['summary']}", lambda value=item: self.select_log(value))
             button.configure(height=67, corner_radius=11, anchor="w", text_color=color,
                              font=self.font(11), fg_color=RAISED)
             button.grid(row=index, column=0, sticky="ew", padx=4, pady=4)
+            self.log_buttons[item["name"]] = button
         selected = next((item for item in rows if item["name"] == self.selected_log_name), None)
         if rows:
             self.select_log(selected or rows[0])
         else:
+            self.displayed_log = None
+            self.copy_log_button.configure(state="disabled")
+            self.label(self.log_list, "没有找到记录" if self.logs else "还没有记录", 12, MUTED).grid(row=0, column=0, padx=15, pady=30)
             self.log_title.configure(text="没有匹配的记录" if self.logs else "等待第一条记录")
             self.log_text.configure(state="normal")
             self.log_text.delete("1.0", "end")
@@ -530,7 +878,28 @@ class StudioInterface:
 
     def select_log(self, item):
         self.selected_log_name = item["name"]
-        super().select_log(item)
+        for name, button in self.log_buttons.items():
+            selected = name == item["name"]
+            button.configure(fg_color="#E4EBDD" if selected else RAISED,
+                             border_color=ACCENT if selected else BORDER, border_width=1 if selected else 0)
+        signature = item["name"], item["text"]
+        if signature != self.displayed_log:
+            super().select_log(item)
+            self.displayed_log = signature
+        self.copy_log_button.configure(state="normal")
+        reader = self.log_text._textbox
+        reader.tag_remove("search_match", "1.0", "end")
+        query = self.log_search.get().strip()
+        if query:
+            reader.tag_configure("search_match", background="#E8E0F0", foreground=INK)
+            index = "1.0"
+            while True:
+                index = reader.search(query, index, stopindex="end", nocase=True)
+                if not index:
+                    break
+                end = f"{index}+{len(query)}c"
+                reader.tag_add("search_match", index, end)
+                index = end
 
     def build_tasks(self, frame):
         card = self.card(frame)
@@ -550,8 +919,10 @@ class StudioInterface:
         add = ctk.CTkFrame(card, fg_color="transparent")
         add.grid(row=5, column=0, sticky="ew", padx=24, pady=(11, 0))
         self.new_time_var = ctk.StringVar(value="07:30")
-        ctk.CTkEntry(add, textvariable=self.new_time_var, height=33, width=82, fg_color=BG,
-                      border_color=BORDER, text_color=INK, font=self.font(12)).pack(side="left")
+        self.new_time_entry = ctk.CTkEntry(add, textvariable=self.new_time_var, height=33, width=82, fg_color=BG,
+                                            border_color=BORDER, text_color=INK, font=self.font(12))
+        self.new_time_entry.pack(side="left")
+        self.new_time_entry.bind("<Return>", lambda _: self.add_task_time())
         button = self.button(add, "+ 添加时间", self.add_task_time, width=104)
         button.configure(height=33)
         button.pack(side="left", padx=(8, 17))
@@ -606,7 +977,8 @@ class StudioInterface:
             incoming = service.validate_times(value if value is not None else self.new_time_var.get())
             times = service.validate_times(self.times_var.get()) if self.times_var.get().strip() else []
             combined = service.validate_times(", ".join(times + incoming))
-            self.times_var.set(", ".join(combined))
+            if combined != times:
+                self.times_var.set(", ".join(combined))
             self.notify("这个时间已在列表中。" if combined == times else "时间已添加，保存后生效。")
         except ValueError as exc:
             self.notify(str(exc), True)
@@ -649,6 +1021,10 @@ class StudioInterface:
     def start_run(self):
         if self.process:
             return
+        if self.settings_dirty:
+            self.show_page("settings")
+            self.notify("账号设置还有未保存的修改，请先保存或重新载入，再开始运行。", True)
+            return
         if self.goal_dirty and not self.save_quick_goal():
             return
         self.execution_state = "idle"
@@ -667,9 +1043,12 @@ class StudioInterface:
             self.update_overview()
 
     def open_command_palette(self, event=None):
+        if self.goal_editor and self.goal_editor.winfo_exists():
+            return "break"
         if self.palette and self.palette.winfo_exists():
             self.palette.lift()
             return "break"
+        self.palette_focus = self.focus_get()
         box = ctk.CTkToplevel(self)
         self.palette = box
         box.title("move · 快速跳转")
@@ -679,42 +1058,88 @@ class StudioInterface:
         box.transient(self)
         box.grab_set()
         self.label(box, "想去哪里？", 23, bold=True).pack(anchor="w", padx=25, pady=(22, 2))
-        self.label(box, "输入关键词，按 Enter 执行第一项；Esc 关闭。", 11, MUTED).pack(anchor="w", padx=25, pady=(0, 12))
-        query = ctk.StringVar(value="")
-        entry = ctk.CTkEntry(box, textvariable=query, height=42, fg_color=PANEL, border_color=BORDER,
-                             text_color=INK, font=self.font(14), corner_radius=12)
-        entry.pack(fill="x", padx=25)
-        results = ctk.CTkScrollableFrame(box, fg_color="transparent", height=245)
-        results.pack(fill="both", expand=True, padx=18, pady=(10, 16))
-        actions = [("运行面板", lambda: self.show_page("overview")), ("账号与步数", lambda: self.show_page("settings")),
+        self.label(box, "↑ ↓ 选择  ·  Enter 打开  ·  Esc 返回", 11, MUTED).pack(anchor="w", padx=25, pady=(0, 12))
+        self.palette_query = ctk.StringVar(value="")
+        self.palette_entry = ctk.CTkEntry(box, textvariable=self.palette_query, height=42, fg_color=PANEL, border_color=BORDER,
+                                          text_color=INK, font=self.font(14), corner_radius=12)
+        self.palette_entry.pack(fill="x", padx=25)
+        self.palette_results = ctk.CTkScrollableFrame(box, fg_color="transparent", height=245)
+        self.palette_results.pack(fill="both", expand=True, padx=18, pady=(10, 16))
+        self.palette_actions = [("今日目标 / 首页", lambda: self.show_page("overview")), ("账号设置 / 步数范围", lambda: self.show_page("settings")),
                    ("运行记录 / 日志搜索", lambda: self.show_page("logs")), ("自动任务 / 定时计划", lambda: self.show_page("tasks")),
                    ("运动轨迹 / 地图", lambda: self.show_page("sport")), ("切换项目目录", self.choose_project)]
-        if self.current_page == "overview":
-            actions.extend([("保存当前目标", self.save_quick_goal), ("保存当前目标并运行", self.start_run)])
+        if self.current_page == "overview" and not self.process:
+            self.palette_actions.extend([("精确输入目标", self.open_goal_editor), ("保存当前目标", self.save_quick_goal),
+                                          ("检查未保存的账号设置" if self.settings_dirty else "保存目标并运行" if self.goal_dirty else "立即运行已保存目标", self.start_run)])
+            if self.goal_dirty:
+                self.palette_actions.append(("还原已保存的目标", self.restore_quick_goal))
         elif self.current_page == "settings":
-            actions.append(("保存账号与步数设置", self.save_settings))
+            self.palette_actions.append(("保存账号与步数设置", self.save_settings))
         elif self.current_page == "tasks":
-            actions.append(("保存自动任务时间", self.save_task_clicked))
-        visible = []
+            self.palette_actions.append(("保存自动任务时间", self.save_task_clicked))
+        self.palette_query.trace_add("write", self.render_palette)
+        box.bind("<Escape>", lambda _: self.close_palette())
+        self.palette_entry.bind("<Down>", lambda _: self.move_palette_selection(1))
+        self.palette_entry.bind("<Up>", lambda _: self.move_palette_selection(-1))
+        self.palette_entry.bind("<Return>", lambda _: self.execute_palette_selection())
+        box.protocol("WM_DELETE_WINDOW", self.close_palette)
+        self.render_palette()
+        self.after(100, lambda: self.palette_entry.focus_set() if self.palette and self.palette.winfo_exists() else None)
+        return "break"
 
-        def execute(command):
-            box.destroy()
+    def render_palette(self, *_):
+        for child in self.palette_results.winfo_children():
+            child.destroy()
+        query = self.palette_query.get().strip().casefold()
+        self.palette_visible = [item for item in self.palette_actions if query in item[0].casefold()]
+        self.palette_buttons = []
+        self.palette_index = 0
+        self.palette_results._parent_canvas.yview_moveto(0)
+        for index, (title, command) in enumerate(self.palette_visible):
+            button = self.button(self.palette_results, title + "   ↗", lambda i=index: self.execute_palette_selection(i))
+            button.configure(anchor="w", height=36, font=self.font(12))
+            button.pack(fill="x", padx=3, pady=3)
+            self.palette_buttons.append(button)
+        if not self.palette_visible:
+            self.label(self.palette_results, "没有匹配的操作", 15, INK).pack(pady=(33, 8))
+            self.label(self.palette_results, "试试“目标”“日志”或“地图”。", 11, MUTED).pack()
+        self._highlight_palette()
+
+    def _highlight_palette(self):
+        for index, button in enumerate(self.palette_buttons):
+            selected = index == self.palette_index
+            button.configure(fg_color="#DFE7DC" if selected else RAISED,
+                             text_color=INK if selected else MUTED,
+                             border_width=1 if selected else 0, border_color=ACCENT)
+
+    def move_palette_selection(self, delta):
+        if self.palette_visible:
+            self.palette_index = (self.palette_index + delta) % len(self.palette_visible)
+            self._highlight_palette()
+            self.palette.update_idletasks()
+            canvas = self.palette_results._parent_canvas
+            button = self.palette_buttons[self.palette_index]
+            y = button.winfo_rooty() - canvas.winfo_rooty()
+            bounds = canvas.bbox("all")
+            if bounds and (y < 0 or y + button.winfo_height() > canvas.winfo_height()):
+                canvas.yview_moveto(max(0, canvas.canvasy(0) + y - 60) / max(1, bounds[3]))
+        return "break"
+
+    def execute_palette_selection(self, index=None):
+        if not self.palette_visible:
+            return "break"
+        command = self.palette_visible[self.palette_index if index is None else index][1]
+        self.close_palette()
+        self.after(30, command)
+        return "break"
+
+    def close_palette(self):
+        if self.palette:
+            self.palette.destroy()
             self.palette = None
-            self.after(30, command)
-
-        def render(*_):
-            for child in results.winfo_children():
-                child.destroy()
-            visible[:] = [item for item in actions if query.get().strip().casefold() in item[0].casefold()]
-            for title, command in visible:
-                button = self.button(results, title + "   ↗", lambda action=command: execute(action))
-                button.configure(anchor="w", height=36, font=self.font(12))
-                button.pack(fill="x", padx=3, pady=3)
-        query.trace_add("write", render)
-        box.bind("<Escape>", lambda _: execute(lambda: None))
-        entry.bind("<Return>", lambda _: execute(visible[0][1]) if visible else None)
-        render()
-        self.after(100, lambda: entry.focus_set() if box.winfo_exists() else None)
+        previous = getattr(self, "palette_focus", None)
+        if previous and previous.winfo_exists():
+            previous.focus_set()
         return "break"
 
     def show_help(self):
@@ -727,9 +1152,9 @@ class StudioInterface:
         reader = ctk.CTkTextbox(box, fg_color=PANEL, text_color=INK, corner_radius=16,
                                 font=self.font(12), wrap="word")
         reader.pack(fill="both", expand=True, padx=25)
-        reader.insert("1.0", "首页目标\n拖动轨道、滑动横条或点选预设，只调整目标预览。点击“保存目标”后写入配置；有草稿时，“保存并运行”会保存目标再开始。刻度表示设定值。\n\n"
-                      "账号与步数\n使用 Zepp Life 手机号或邮箱。在这里配置随机范围、按时间递增和多账号。已有密码留空保留。保存前会备份原配置。\n\n"
-                      "日志与快速跳转\n运行记录支持关键词搜索和结果筛选。按 Ctrl+K 可快速切换页面、保存目标或运行。\n\n"
+        reader.insert("1.0", "首页目标\n拖动刻度、滑动横条或点选预设，只调整目标预览。也可精确输入整数，点“还原”恢复保存的目标。点击“保存目标”后写入配置；有草稿时，“保存并运行”会保存目标再开始。刻度表示设定值。轻触芙莉莲头像，会有一点旅途回应。\n\n"
+                      "账号与步数\n使用 Zepp Life 手机号或邮箱。在这里配置随机范围、按时间递增和多账号。已有密码留空保留，更改账号后需重新填写密码。错误输入会高亮定位；删除账号可以撤销。导航上的小点表示未保存的修改。保存前会备份原配置。\n\n"
+                      "日志与快速跳转\n运行记录支持关键词搜索、匹配高亮、结果筛选和复制脱敏记录。Ctrl+F 聚焦搜索，Esc 清除筛选。按 Ctrl+K 搜索操作，用上下键选择、Enter 执行、Esc 返回。Ctrl+S 保存当前页面的目标、设置或计划时间。\n\n"
                       "自动任务\n点时间标签上的 × 删除，输入 HH:MM 后添加；修改后点击保存才生效。电脑需开机并登录 Windows。\n\n"
                       "运动轨迹\n联网加载 sport.gyvv.top 原站。网页上方可重试、打开大窗口、选择导出位置。原站的地图和生成服务需要网络。\n\n"
                       "本地文件\n首次优先读取 E:\\mimotion，也可切换项目目录。配置、登录缓存、备份和浏览器资料保存在所选目录，请保管好。分享软件请只分享发布文件。\n\n"
@@ -738,11 +1163,13 @@ class StudioInterface:
         self.button(box, "知道了", box.destroy, primary=True, width=108).pack(anchor="e", padx=25, pady=19)
 
     def close_app(self):
+        if not self._confirm_discard("关闭软件"):
+            return
         # Let the existing close confirmation protect an in-flight run.
-        for timer in (self.page_transition_id, self.toast_clear_id):
+        for timer in (self.page_transition_id, self.toast_clear_id, self.log_search_id):
             if timer:
                 self.after_cancel(timer)
-        self.page_transition_id = self.toast_clear_id = None
+        self.page_transition_id = self.toast_clear_id = self.log_search_id = None
         super().close_app()
 
     def destroy(self):

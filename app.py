@@ -358,6 +358,7 @@ class BaseMiMotionApp(ctk.CTk):
     def build_settings(self, frame):
         frame.grid_rowconfigure(0, weight=1)
         scroll = ctk.CTkScrollableFrame(frame, fg_color="transparent", corner_radius=0)
+        self.settings_scroll = scroll
         scroll.grid(row=0, column=0, sticky="nsew")
         scroll.grid_columnconfigure(0, weight=1)
         step_card = self.card(scroll)
@@ -369,7 +370,7 @@ class BaseMiMotionApp(ctk.CTk):
         self.mode = ctk.StringVar(value="固定步数" if minimum == maximum else "随机范围")
         ctk.CTkSegmentedButton(step_card, values=["固定步数", "随机范围"], variable=self.mode,
                                command=self.change_mode, selected_color="#DDE7D9",
-                               selected_hover_color="#D3E0CE", unselected_color="#20242E",
+                               selected_hover_color="#D3E0CE", unselected_color=PALE,
                                unselected_hover_color="#E4EBDD", text_color=INK,
                                font=self.font(12), height=36).grid(row=1, column=0, sticky="w", padx=22)
         numbers = ctk.CTkFrame(step_card, fg_color="transparent")
@@ -415,14 +416,17 @@ class BaseMiMotionApp(ctk.CTk):
         advanced.grid(row=2, column=0, sticky="ew", padx=(3, 9), pady=(0, 7))
         self.label(advanced, "多账号运行间隔", 12).grid(row=0, column=0, sticky="w", padx=22, pady=17)
         self.gap_value = ctk.StringVar(value=str(self.config_data.get("SLEEP_GAP", "5")))
-        ctk.CTkEntry(advanced, textvariable=self.gap_value, width=75, height=35,
-                      border_color=BORDER, fg_color=BG, font=self.font(12)).grid(row=0, column=1)
+        self.gap_entry = ctk.CTkEntry(advanced, textvariable=self.gap_value, width=75, height=35,
+                                     border_color=BORDER, fg_color=BG, font=self.font(12))
+        self.gap_entry.grid(row=0, column=1)
         self.label(advanced, "秒", 12, MUTED).grid(row=0, column=2, padx=(8, 22))
         buttons = ctk.CTkFrame(frame, fg_color="transparent")
         buttons.grid(row=1, column=0, sticky="ew", pady=(13, 0))
-        self.button(buttons, "保存设置", self.save_settings, primary=True, width=143).pack(side="right")
+        self.settings_save_button = self.button(buttons, "保存设置", self.save_settings, primary=True, width=143)
+        self.settings_save_button.pack(side="right")
         self.button(buttons, "重新载入", self.reset_settings, width=110).pack(side="right", padx=10)
         self.button(buttons, "重置登录缓存", self.reset_tokens, width=130).pack(side="left")
+        self.settings_actions = buttons
 
     def change_mode(self, value):
         fixed = value == "固定步数"
